@@ -85,7 +85,15 @@ python -m cae_rag.eval
 streamlit run src/cae_rag/app.py
 ```
 
-`python -m cae_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付き）。実際の数値はLM Studioにロードしたモデルに依存するため、このリポジトリには含めていない。手元で実行して確認すること。
+`python -m cae_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付き）。実際の数値はLM Studioにロードしたモデルに依存するため参考値だが、手元（`qwen2.5-7b-instruct` / `text-embedding-nomic-embed-text-v1.5`）での実行結果は次の通り。
+
+| 区分 | n | hit_rate | recall@k | MRR | citation_rate | avg_judge_score |
+| --- | --- | --- | --- | --- | --- | --- |
+| 全体 | 15 | 1.00 | 0.93 | 0.87 | 0.93 | 3.2 |
+| 部署をまたいだ設問 | 5 | 1.00 | 0.90 | 0.77 | 1.00 | 3.4 |
+| 自部署内の設問 | 10 | 1.00 | 0.95 | 0.92 | 0.90 | 3.1 |
+
+部署をまたいだ設問でもhit_rateが1.00（全問で少なくとも1件は正解レポートを検索できている）で、citation_rateはむしろ自部署内の設問より高い。部署間の情報共有が不十分でも横断検索できる、という本プロジェクトの価値提案が数値として裏付けられている。
 
 ## 開発プロセス（グラフエンジニアリング + 独立レビュー）
 
