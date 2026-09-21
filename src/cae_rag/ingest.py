@@ -1,14 +1,19 @@
 """Ingestion パイプライン（DAGノードB）。
 
-`data/synth_reports/*.md`（datagenノードが生成したダミー解析レポート）を読み込み、
-セクション単位でチャンキングし、ローカル埋め込みモデルでベクトル化してChromaDBに格納する。
+`data/synth_reports/*`（datagenノードが生成したダミー解析レポート。Markdown/Word/Excel/
+PowerPoint/PDFのいずれか）を読み込み、セクション単位でチャンキングし、ローカル埋め込み
+モデルでベクトル化してChromaDBに格納する。
 
-メタデータ（部署・解析種別・部品・ソルバー・日付等）は、datagenが各レポート冒頭に書き出す
-YAML風フロントマター（`---`で囲まれた`key: value`行）から直接読み取る。自由記述文からの
+メタデータ（部署・解析種別・部品・ソルバー・日付等）は、datagenが各ファイルの先頭に書き出す
+ヘッダーブロック（Markdownなら`---`フロントマター、Wordなら先頭の表、Excelなら先頭の行、
+PowerPointなら1枚目のスライド、PDFなら先頭のテキスト）から直接読み取る。自由記述文からの
 あいまいな抽出は行わない（レポート形式を自分たちで決められるため、構造化ヘッダーの方が
 確実で、実務の社内文書でもよくあるパターンでもある）。
 
-チャンキングはMarkdownの `## ` 見出し単位（セクション境界を尊重し、単純な文字数分割はしない）。
+チャンキングは `## 見出し` 単位（セクション境界を尊重し、単純な文字数分割はしない）。
+ファイル形式によって、その構造をどこまで正確に読み取れるかには差がある（Word/PowerPointは
+見出しスタイルやスライド構造から確実に判定できるが、PDFは本質的に構造を持たないため
+テキストパターン頼みの抽出になる。実務のPDF取り込みでよくある制約をそのまま反映している）。
 """
 
 from __future__ import annotations
@@ -60,12 +65,165 @@ def split_into_sections(body: str) -> list[tuple[str, str]]:
     return sections
 
 
-def build_chunks(report_path: Path) -> list[Chunk]:
-    raw = report_path.read_text(encoding="utf-8")
+def _extract_markdown(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    raw = path.read_text(encoding="utf-8")
     meta, body = parse_frontmatter(raw)
+    return meta, split_into_sections(body)
+
+
+def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Wordファイルからメタデータ（先頭の表）とセクション（見出しスタイル単位）を取り出す。"""
+    from docx import Document
+
+    doc = Document(str(path))
+    if not doc.tables:
+        raise ValueError(f"{path}: メタデータの表が見つかりません。datagenで生成したファイルか確認してください。")
+    meta = {row.cells[0].text.strip(): row.cells[1].text.strip() for row in doc.tables[0].rows}
+
+    sections: list[tuple[str, str]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
+    for para in doc.paragraphs:
+        style_name = para.style.name if para.style is not None else ""
+        # "Heading 1" はタイトル行なので対象外。"Heading 2" 以降がセクション見出し。
+        if style_name.startswith("Heading") and style_name != "Heading 1":
+            if current_heading is not None:
+                sections.append((current_heading, "\n".join(current_lines).strip()))
+            current_heading = para.text.strip()
+            current_lines = []
+        elif current_heading is not None:
+            current_lines.append(para.text)
+    if current_heading is not None:
+        sections.append((current_heading, "\n".join(current_lines).strip()))
+    return meta, sections
+
+
+def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Excelファイルからメタデータ（先頭の行群）とセクション（見出し, 内容の行）を取り出す。
+
+    行数を決め打ちにせず、A列が空になる行までをメタデータとみなし、
+    その次の1行を区切りとしてスキップしてからセクション行を読む。
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(str(path), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+
+    meta: dict[str, str] = {}
+    idx = 0
+    while idx < len(rows) and rows[idx] and rows[idx][0]:
+        key = str(rows[idx][0])
+        value = rows[idx][1] if len(rows[idx]) > 1 else None
+        meta[key] = "" if value is None else str(value)
+        idx += 1
+    idx += 1  # 区切りの空行をスキップ
+
+    sections: list[tuple[str, str]] = []
+    for row in rows[idx:]:
+        if not row or not row[0]:
+            continue
+        heading = str(row[0])
+        value = row[1] if len(row) > 1 else None
+        sections.append((heading, "" if value is None else str(value)))
+    return meta, sections
+
+
+def _extract_pptx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """PowerPointファイルから、1枚目=メタデータ、2枚目以降=セクションとして取り出す。"""
+    from pptx import Presentation
+
+    prs = Presentation(str(path))
+    slides = list(prs.slides)
+    if not slides:
+        raise ValueError(f"{path}: スライドが1枚もありません。")
+
+    def _body_text(slide) -> str:
+        for shape in slide.placeholders:
+            # placeholder_format.idx == 0 はタイトル。それ以外を本文とみなす。
+            if shape.placeholder_format.idx != 0 and shape.has_text_frame:
+                return shape.text_frame.text
+        return ""
+
+    meta: dict[str, str] = {}
+    for line in _body_text(slides[0]).splitlines():
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        meta[key.strip()] = value.strip()
+
+    sections: list[tuple[str, str]] = []
+    for slide in slides[1:]:
+        heading = slide.shapes.title.text.strip() if slide.shapes.title is not None else ""
+        sections.append((heading, _body_text(slide)))
+    return meta, sections
+
+
+def _parse_pdf_text(full_text: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """PDFから抽出済みのプレーンテキストを、`key: value` 行をメタデータ、`## 見出し` 行を
+    セクション境界としてパースする（pypdfに依存しない純粋関数）。
+
+    datagen._pdf_lines() が組み立てる行の並びを前提にしている。PDFは本質的に構造を
+    持たないため、他形式と違いテキストパターン頼みの抽出になる（実務のPDF取り込みでも
+    よくある制約）。pypdfからのテキスト抽出処理と分離してあるので、pypdf/reportlabが
+    無い環境でも datagen._pdf_lines() の出力を直接渡して往復ロジックをテストできる。
+    """
+    lines = full_text.split("\n")
+
+    meta: dict[str, str] = {}
+    idx = 0
+    while idx < len(lines) and lines[idx].strip():
+        line = lines[idx].strip()
+        if ":" in line:
+            key, _, value = line.partition(":")
+            meta[key.strip()] = value.strip()
+        idx += 1
+    idx += 1  # 区切りの空行をスキップ
+
+    sections: list[tuple[str, str]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
+    for line in lines[idx:]:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if current_heading is not None:
+                sections.append((current_heading, "\n".join(current_lines).strip()))
+            current_heading = stripped[3:].strip()
+            current_lines = []
+        elif current_heading is not None and stripped:
+            current_lines.append(stripped)
+    if current_heading is not None:
+        sections.append((current_heading, "\n".join(current_lines).strip()))
+    return meta, sections
+
+
+def _extract_pdf(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(path))
+    full_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    return _parse_pdf_text(full_text)
+
+
+_EXTRACTORS = {
+    ".md": _extract_markdown,
+    ".docx": _extract_docx,
+    ".xlsx": _extract_xlsx,
+    ".pptx": _extract_pptx,
+    ".pdf": _extract_pdf,
+}
+
+
+def build_chunks(report_path: Path) -> list[Chunk]:
+    extractor = _EXTRACTORS.get(report_path.suffix.lower())
+    if extractor is None:
+        raise ValueError(f"未対応のファイル形式です: {report_path}")
+    meta, sections = extractor(report_path)
     report_id = meta.get("report_id", report_path.stem)
     chunks: list[Chunk] = []
-    for heading, text in split_into_sections(body):
+    for heading, text in sections:
+        if not text:
+            continue
         chunk_id = f"{report_id}::{heading}"
         chunk_text = f"【{heading}】\n{text}"
         chunk_meta = {**meta, "section": heading}
@@ -74,8 +232,9 @@ def build_chunks(report_path: Path) -> list[Chunk]:
 
 
 def load_all_chunks(reports_dir: Path = SYNTH_REPORTS_DIR) -> list[Chunk]:
+    paths = sorted(p for ext in _EXTRACTORS for p in reports_dir.glob(f"*{ext}"))
     chunks: list[Chunk] = []
-    for path in sorted(reports_dir.glob("*.md")):
+    for path in paths:
         chunks.extend(build_chunks(path))
     return chunks
 
@@ -86,7 +245,7 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
 
     chunks = load_all_chunks(reports_dir)
     if not chunks:
-        raise SystemExit(f"{reports_dir} にMarkdownレポートが見つかりません。先にdatagenを実行してください。")
+        raise SystemExit(f"{reports_dir} にレポートが見つかりません。先にdatagenを実行してください。")
 
     config = load_config()
     chroma_dir.mkdir(parents=True, exist_ok=True)

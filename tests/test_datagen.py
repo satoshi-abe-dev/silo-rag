@@ -8,8 +8,13 @@ from cae_rag.datagen import (
     ANALYSIS_TYPES,
     DEPARTMENTS,
     DEPT_TERMINOLOGY,
+    FILE_FORMATS,
+    METADATA_FIELDS,
     ReportSpec,
     _generate_one_report,
+    _metadata_dict,
+    _pdf_lines,
+    _split_sections,
     _validate_report_body,
     build_prompt,
     generate_eval_qa,
@@ -51,6 +56,7 @@ def _make_spec(**overrides) -> ReportSpec:
         failure_mode="メッシュが粗く、応力集中部を捉えられていなかった",
         author="担当者A",
         report_date=date(2023, 1, 1),
+        file_format="md",
     )
     base.update(overrides)
     return ReportSpec(**base)
@@ -170,10 +176,11 @@ def test_generate_one_report_retries_after_validation_failure():
     valid_body = _valid_body(spec)
 
     client = _ScriptedClient([invalid_body, valid_body])
-    content = _generate_one_report(client, spec)
+    metadata, sections = _generate_one_report(client, spec)
 
     assert client.call_count == 2  # 1回目失敗、2回目で成功
-    assert content.strip().endswith("本文がここに入ります。")
+    assert metadata["report_id"] == spec.report_id
+    assert sections[-1][1] == "本文がここに入ります。"
 
 
 def test_generate_one_report_raises_after_exhausting_retries():
@@ -186,3 +193,45 @@ def test_generate_one_report_raises_after_exhausting_retries():
         _generate_one_report(client, spec)
 
     assert client.call_count == 3  # _MAX_GENERATION_ATTEMPTS=3で打ち切られる
+
+
+def test_generate_report_specs_assigns_file_format_from_pool():
+    specs = generate_report_specs(40, seed=13)
+    assert all(s.file_format in FILE_FORMATS for s in specs)
+    # 部署に固定しない設計なので、十分な件数があれば複数の形式が混在するはず。
+    assert len({s.file_format for s in specs}) > 1
+
+
+def test_metadata_dict_has_all_expected_fields_in_order():
+    spec = _make_spec()
+    meta = _metadata_dict(spec)
+    assert list(meta.keys()) == METADATA_FIELDS
+    assert meta["report_id"] == spec.report_id
+    assert meta["date"] == spec.report_date.isoformat()
+
+
+def test_split_sections_matches_body_structure():
+    spec = _make_spec()
+    body = _valid_body(spec)
+    sections = _split_sections(body)
+    assert [h for h, _ in sections] == _required_headings(spec)
+    assert all(text == "本文がここに入ります。" for _, text in sections)
+
+
+def test_pdf_lines_round_trips_through_ingest_parser():
+    """datagen._pdf_lines() の出力を、ingest._parse_pdf_text() でそのまま
+    パースし直せることを確認する（pypdf/reportlabなしで往復ロジックだけ検証する）。"""
+    from cae_rag.ingest import _parse_pdf_text
+
+    spec = _make_spec()
+    metadata = _metadata_dict(spec)
+    sections = [("解析目的", "1行目の本文です。"), ("結果サマリー", "こちらも短い本文。")]
+
+    lines = _pdf_lines(metadata, sections)
+    full_text = "\n".join(lines)
+    parsed_meta, parsed_sections = _parse_pdf_text(full_text)
+
+    assert parsed_meta == metadata
+    assert [h for h, _ in parsed_sections] == ["解析目的", "結果サマリー"]
+    assert parsed_sections[0][1] == "1行目の本文です。"
+    assert parsed_sections[1][1] == "こちらも短い本文。"

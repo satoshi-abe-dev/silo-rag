@@ -6,6 +6,8 @@
     - 実在・架空を問わず企業名は一切出さない。「ある1社内の複数部署」という匿名設定。
     - 部署間で情報共有が完全には統一されていない状況を再現するため、部署ごとに
       見出し語彙（ハウススタイル）を微妙に変える。
+    - ファイル形式（Markdown/Word/Excel/PowerPoint/PDF）はレポートごとにランダムに
+      割り当てる（部署には固定しない。現場でファイル形式が混在している状況の再現）。
     - 対象は構造解析（FEM）のみ。熱解析・CFD等は対象外。
 
 生成はローカルLLM（LM Studio等、OpenAI互換API）経由。`python -m cae_rag.datagen` で実行する。
@@ -52,6 +54,13 @@ DEPT_TERMINOLOGY: dict[str, dict[str, str]] = {
     "品質保証部": {"conditions": "入力条件", "mesh": "メッシュ仕様"},
 }
 
+# ファイル形式は部署に固定せず、レポートごとにランダムに割り当てる（どの部署でも
+# 複数の形式が混在しうる）。部署間の非統一性は用語（DEPT_TERMINOLOGY）側で表現する。
+FILE_FORMATS = ["md", "docx", "xlsx", "pdf", "pptx"]
+
+# メタデータの固定フィールド順。Word/Excel/PowerPoint/PDFの書き出しで共通して使う。
+METADATA_FIELDS = ["report_id", "dept", "analysis_type", "part", "solver", "material", "author", "date"]
+
 FAILURE_MODES = [
     "メッシュが粗く、応力集中部を捉えられていなかった",
     "収束計算が発散し、時間刻みを細分化して収束させた",
@@ -81,6 +90,7 @@ class ReportSpec:
     failure_mode: str
     author: str
     report_date: date
+    file_format: str
 
 
 def generate_report_specs(count: int, *, seed: int | None = None) -> list[ReportSpec]:
@@ -106,6 +116,7 @@ def generate_report_specs(count: int, *, seed: int | None = None) -> list[Report
                 failure_mode=rng.choice(FAILURE_MODES),
                 author=rng.choice(AUTHOR_NAMES),
                 report_date=base_date + timedelta(days=rng.randint(0, 900)),
+                file_format=rng.choice(FILE_FORMATS),
             )
         )
     return specs
@@ -146,24 +157,36 @@ def build_prompt(spec: ReportSpec) -> tuple[str, str]:
     return system, user
 
 
-def _frontmatter(spec: ReportSpec) -> str:
-    lines = [
-        "---",
-        f"report_id: {spec.report_id}",
-        f"dept: {spec.dept}",
-        f"analysis_type: {spec.analysis_type}",
-        f"part: {spec.part}",
-        f"solver: {spec.solver}",
-        f"material: {spec.material}",
-        f"author: {spec.author}",
-        f"date: {spec.report_date.isoformat()}",
-        "---",
-        "",
-    ]
-    return "\n".join(lines)
+def _metadata_dict(spec: ReportSpec) -> dict[str, str]:
+    return {
+        "report_id": spec.report_id,
+        "dept": spec.dept,
+        "analysis_type": spec.analysis_type,
+        "part": spec.part,
+        "solver": spec.solver,
+        "material": spec.material,
+        "author": spec.author,
+        "date": spec.report_date.isoformat(),
+    }
 
 
 _SECTION_HEADING_RE = re.compile(r"^## +(.+?)\s*$", re.MULTILINE)
+
+
+def _split_sections(body: str) -> list[tuple[str, str]]:
+    """本文を `## 見出し` 単位で (見出し, 本文) のリストに分割する。
+
+    ingest.split_into_sections() と同じ考え方だが、datagenがingestに依存する
+    （DAGの向きと逆の結合が生じる）のを避けるため、ここで独自に持つ。
+    """
+    matches = list(_SECTION_HEADING_RE.finditer(body))
+    sections: list[tuple[str, str]] = []
+    for i, m in enumerate(matches):
+        heading = m.group(1).strip()
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
+        sections.append((heading, body[start:end].strip()))
+    return sections
 
 
 def _validate_report_body(spec: ReportSpec, body: str) -> None:
@@ -209,13 +232,16 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
 _MAX_GENERATION_ATTEMPTS = 3
 
 
-def _generate_one_report(client: LLMClient, spec: ReportSpec) -> str:
-    """1件のレポートを生成する。
+def _generate_one_report(client: LLMClient, spec: ReportSpec) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """1件のレポートを生成し、(メタデータ, [(見出し, 本文), ...]) を返す。
 
     小型のローカルLLMは、指定した見出し構成を毎回厳密には守れないことがある
     （実際に60件中1件、見出し欠落で失敗する事例が起きた）。温度付き(0.7)サンプリング
     なので同じ入力でも生成のたびに結果が変わることを利用し、生成→検証に失敗したら
     数回リトライしてから諦める。
+
+    ここではまだファイルには書き出さない（書式はspec.file_formatによって異なり、
+    実際の書き出しはgenerate_reports()が全件成功を確認してから行う）。
     """
     system, user = build_prompt(spec)
     last_error: LLMConnectionError | None = None
@@ -227,11 +253,138 @@ def _generate_one_report(client: LLMClient, spec: ReportSpec) -> str:
             last_error = exc
             print(f"{spec.report_id}: 生成/検証に失敗（{attempt}/{_MAX_GENERATION_ATTEMPTS}回目）: {exc}")
             continue
-        title = f"# {spec.part} {spec.analysis_type} 解析レポート（{spec.report_id}）\n\n"
-        return _frontmatter(spec) + title + body.strip() + "\n"
+        return _metadata_dict(spec), _split_sections(body)
 
     assert last_error is not None
     raise last_error
+
+
+# --- フォーマット別の書き出し ------------------------------------------------
+
+
+def _report_title(metadata: dict[str, str]) -> str:
+    return f"{metadata['part']} {metadata['analysis_type']} 解析レポート（{metadata['report_id']}）"
+
+
+def _write_markdown(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+    lines = ["---", *(f"{key}: {metadata[key]}" for key in METADATA_FIELDS), "---", ""]
+    header = "\n".join(lines)
+    title = f"# {_report_title(metadata)}\n\n"
+    body = "\n\n".join(f"## {heading}\n{text}" for heading, text in sections) + "\n"
+    path.write_text(header + title + body, encoding="utf-8")
+
+
+def _write_docx(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading(_report_title(metadata), level=1)
+
+    table = doc.add_table(rows=len(METADATA_FIELDS), cols=2)
+    for row, key in zip(table.rows, METADATA_FIELDS, strict=True):
+        row.cells[0].text = key
+        row.cells[1].text = metadata[key]
+
+    for heading, text in sections:
+        doc.add_heading(heading, level=2)
+        doc.add_paragraph(text)
+
+    doc.save(str(path))
+
+
+def _write_xlsx(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "report"
+    for i, key in enumerate(METADATA_FIELDS, start=1):
+        ws.cell(row=i, column=1, value=key)
+        ws.cell(row=i, column=2, value=metadata[key])
+
+    start_row = len(METADATA_FIELDS) + 2  # メタデータの後に1行空ける
+    for offset, (heading, text) in enumerate(sections):
+        ws.cell(row=start_row + offset, column=1, value=heading)
+        ws.cell(row=start_row + offset, column=2, value=text)
+
+    wb.save(str(path))
+
+
+def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+    from pptx import Presentation
+
+    prs = Presentation()
+    layout = prs.slide_layouts[1]  # タイトル + コンテンツ
+
+    meta_slide = prs.slides.add_slide(layout)
+    meta_slide.shapes.title.text = "レポートメタデータ"
+    meta_slide.placeholders[1].text_frame.text = "\n".join(f"{key}: {metadata[key]}" for key in METADATA_FIELDS)
+
+    for heading, text in sections:
+        slide = prs.slides.add_slide(layout)
+        slide.shapes.title.text = heading
+        slide.placeholders[1].text_frame.text = text
+
+    prs.save(str(path))
+
+
+def _pdf_lines(metadata: dict[str, str], sections: list[tuple[str, str]]) -> list[str]:
+    """PDFページに描画するテキスト行を組み立てる（reportlabに依存しない純粋関数）。
+
+    ingest._parse_pdf_text() はこの行の並びを前提にパースする。reportlab/pypdf
+    どちらもインストールされていない環境でも、この関数とingest側のパーサーだけで
+    往復（書く→読む）ロジックの整合性をテストできるように、描画処理と分離してある。
+    """
+    import textwrap
+
+    # 日本語はreportlabのdrawStringが自動折り返ししないため、あらかじめ
+    # 全角換算で1行38文字程度に折り返してから描画する。
+    lines: list[str] = [f"{key}: {metadata[key]}" for key in METADATA_FIELDS]
+    lines.append("")
+    for heading, text in sections:
+        lines.append(f"## {heading}")
+        for raw_line in text.splitlines() or [""]:
+            lines.extend(textwrap.wrap(raw_line, width=38) or [""])
+        lines.append("")
+    return lines
+
+
+def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfgen import canvas
+
+    font_name = "HeiseiKakuGo-W5"
+    if font_name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+
+    lines = _pdf_lines(metadata, sections)
+
+    page_width, page_height = 595, 842  # A4 (pt)
+    left_margin, top_margin, bottom_margin = 40, 800, 40
+    font_size, line_height = 11, 16
+
+    c = canvas.Canvas(str(path), pagesize=(page_width, page_height))
+    y = top_margin
+    c.setFont(font_name, font_size)
+    for line in lines:
+        if y < bottom_margin:
+            c.showPage()
+            c.setFont(font_name, font_size)
+            y = top_margin
+        c.drawString(left_margin, y, line)
+        y -= line_height
+    c.showPage()
+    c.save()
+
+
+_WRITERS = {
+    "md": _write_markdown,
+    "docx": _write_docx,
+    "xlsx": _write_xlsx,
+    "pptx": _write_pptx,
+    "pdf": _write_pdf,
+}
 
 
 def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) -> None:
@@ -239,19 +392,21 @@ def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) 
 
     # 全件のLLM生成が完了してからディスクに書き出す。途中のリクエストが失敗しても
     # 前回のデータセット（およびそれと対応するqa_pairs.json）を壊さないため。
-    generated: dict[str, str] = {}
+    generated: dict[str, tuple[dict[str, str], list[tuple[str, str]]]] = {}
     for spec in specs:
         generated[spec.report_id] = _generate_one_report(client, spec)
         print(f"generated (in-memory): {spec.report_id}")
 
-    # ここまで来て初めて、前回の生成物（RPT-*.md）を一掃して書き出す。
-    # --count を減らして再実行したときに古いレポートが残り、今回のQAペアと
-    # 矛盾したデータセットになるのを防ぐ。
-    for stale in out_dir.glob("RPT-*.md"):
-        stale.unlink()
-    for report_id, content in generated.items():
-        path = out_dir / f"{report_id}.md"
-        path.write_text(content, encoding="utf-8")
+    # ここまで来て初めて、前回の生成物を一掃して書き出す。--count を減らして
+    # 再実行したときに古いレポートが残り、今回のQAペアと矛盾したデータセットに
+    # なるのを防ぐ（対象は今回使いうる全フォーマットの拡張子）。
+    for fmt in FILE_FORMATS:
+        for stale in out_dir.glob(f"RPT-*.{fmt}"):
+            stale.unlink()
+    for spec in specs:
+        metadata, sections = generated[spec.report_id]
+        path = out_dir / f"{spec.report_id}.{spec.file_format}"
+        _WRITERS[spec.file_format](metadata, sections, path)
         print(f"wrote: {path}")
 
 
