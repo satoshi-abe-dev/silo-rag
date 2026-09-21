@@ -51,6 +51,10 @@ class LLMConfig:
     model: str = "qwen2.5-7b-instruct"
     # 埋め込み用モデル。LM Studio に埋め込みモデルをロードしておく必要がある。
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"
+    # 画像説明（VLM）用モデル。LM Studio にvisionモデルをロードしておく必要がある
+    # （例: Qwen2.5-VL / Qwen3-VL系）。未ロードでも他機能には影響しない
+    # （画像キャプション取得に失敗した場合はログを出して該当画像をスキップするのみ）。
+    vlm_model: str = "qwen2.5-vl-7b-instruct"
     timeout: float = 300.0
     max_tokens: int = 2048
 
@@ -74,6 +78,7 @@ _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "CAERAG_LLM_API_KEY": ("llm", "api_key", str),
     "CAERAG_LLM_MODEL": ("llm", "model", str),
     "CAERAG_LLM_EMBED_MODEL": ("llm", "embed_model", str),
+    "CAERAG_LLM_VLM_MODEL": ("llm", "vlm_model", str),
     "CAERAG_LLM_TIMEOUT": ("llm", "timeout", float),
     "CAERAG_LLM_MAX_TOKENS": ("llm", "max_tokens", int),
     "CAERAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),

@@ -10,6 +10,7 @@ from cae_rag.datagen import (
     DEPT_TERMINOLOGY,
     FILE_FORMATS,
     METADATA_FIELDS,
+    RESULT_IMAGE_SECTION,
     ReportSpec,
     _generate_one_report,
     _metadata_dict,
@@ -170,17 +171,27 @@ class _ScriptedClient:
 
 
 def test_generate_one_report_retries_after_validation_failure():
+    # _generate_result_image()はmatplotlib依存で、このテストの関心（リトライ挙動）とは
+    # 無関係なので、ここだけ差し替えてmatplotlibなしでも検証できるようにする。
+    import cae_rag.datagen as datagen_module
+
     spec = _make_spec()
     headings = _required_headings(spec)
     invalid_body = "\n\n".join(f"## {h}\n本文" for h in headings[:-1])  # 1見出し欠落
     valid_body = _valid_body(spec)
 
     client = _ScriptedClient([invalid_body, valid_body])
-    metadata, sections = _generate_one_report(client, spec)
+    original = datagen_module._generate_result_image
+    datagen_module._generate_result_image = lambda spec: b"fake-image-bytes"
+    try:
+        metadata, sections, image = _generate_one_report(client, spec)
+    finally:
+        datagen_module._generate_result_image = original
 
     assert client.call_count == 2  # 1回目失敗、2回目で成功
     assert metadata["report_id"] == spec.report_id
     assert sections[-1][1] == "本文がここに入ります。"
+    assert image == b"fake-image-bytes"
 
 
 def test_generate_one_report_raises_after_exhausting_retries():
@@ -216,6 +227,16 @@ def test_split_sections_matches_body_structure():
     sections = _split_sections(body)
     assert [h for h, _ in sections] == _required_headings(spec)
     assert all(text == "本文がここに入ります。" for _, text in sections)
+
+
+def test_result_image_section_matches_ingest_constant():
+    """退行テスト: datagenとingestは互いに依存させない設計上、画像を添付する
+    セクション名を別々の定数として持っている。ズレるとVLMキャプションが
+    正しいセクションに合流しなくなるため、一致していることを保証する。"""
+    from cae_rag.ingest import RESULT_IMAGE_SECTION as INGEST_RESULT_IMAGE_SECTION
+
+    assert RESULT_IMAGE_SECTION == INGEST_RESULT_IMAGE_SECTION
+    assert RESULT_IMAGE_SECTION in _required_headings(_make_spec())
 
 
 def test_pdf_lines_round_trips_through_ingest_parser():

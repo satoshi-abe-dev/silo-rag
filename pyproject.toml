@@ -20,6 +20,8 @@ dependencies = [
     "python-pptx>=1.0",
     "pypdf>=4.0",
     "reportlab>=4.0",
+    "matplotlib>=3.8",
+    "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]

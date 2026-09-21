@@ -1,8 +1,8 @@
-"""ローカル LLM / 埋め込みサーバー（LM Studio 等）への OpenAI 互換クライアント。
+"""ローカル LLM / 埋め込み / VLM サーバー（LM Studio 等）への OpenAI 互換クライアント。
 
-`/chat/completions` と `/embeddings` を httpx で直接叩くだけ。openai パッケージには
-依存しない。接続先は config.llm.base_url。既定は LM Studio の http://localhost:1234/v1。
-Ollama など OpenAI 互換 API を出す他基盤に差し替えても動く。
+`/chat/completions`（テキスト・画像入力とも） と `/embeddings` を httpx で直接叩くだけ。
+openai パッケージには依存しない。接続先は config.llm.base_url。既定は LM Studio の
+http://localhost:1234/v1。Ollama など OpenAI 互換 API を出す他基盤に差し替えても動く。
 
 外部ネットワークへは接続しない（base_url が localhost 前提）。
 meeting-minutes プロジェクト（src/meeting_minutes/model/llm_client.py）の設計思想
@@ -115,6 +115,40 @@ class LLMClient:
             ],
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature,
+            "stream": False,
+        }
+        return self._post_chat(payload).strip()
+
+    def describe_image(
+        self,
+        image_bytes: bytes,
+        prompt: str,
+        *,
+        model: str | None = None,
+        max_tokens: int = 300,
+    ) -> str:
+        """画像1枚をvisionモデル（VLM）に説明させる。ingestの画像キャプション取得に使う。
+
+        LM StudioにロードしたVLMを`config.vlm_model`で指定する（未ロードならエラーになる。
+        呼び出し側で捕捉するかどうかは呼び出し側の判断に委ねる＝ここでは握りつぶさない）。
+        """
+        import base64
+
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        data_url = f"data:image/png;base64,{b64}"
+        payload = {
+            "model": model or self.config.vlm_model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.2,
             "stream": False,
         }
         return self._post_chat(payload).strip()

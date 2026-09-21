@@ -231,9 +231,61 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
 
 _MAX_GENERATION_ATTEMPTS = 3
 
+# 画像を必ず添付するセクション。全部署共通の見出しなので固定できる
+# （DEPT_TERMINOLOGYで語彙が揺れるのはconditions/meshのみ）。
+RESULT_IMAGE_SECTION = "結果サマリー"
 
-def _generate_one_report(client: LLMClient, spec: ReportSpec) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """1件のレポートを生成し、(メタデータ, [(見出し, 本文), ...]) を返す。
+
+def _generate_result_image(spec: ReportSpec) -> bytes:
+    """解析種別に応じて、それらしい結果画像（グラフ/コンター図）をmatplotlibで合成する。
+
+    実際のCAEソルバー出力ではなく、あくまで「画像が埋め込まれたレポート」を再現する
+    ためのダミー画像（report_idから決定的に乱数シードを作るので再現性がある）。
+    """
+    import io
+
+    import matplotlib
+
+    matplotlib.use("Agg")  # ヘッドレス環境向け（GUIバックエンドを使わない）
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    rng = np.random.default_rng(abs(hash(spec.report_id)) % (2**32))
+    fig, ax = plt.subplots(figsize=(5, 3.5), dpi=100)
+
+    if spec.analysis_type == "振動解析（強制応答）":
+        t = np.linspace(0, 2, 200)
+        amp = np.exp(-t) * np.sin(2 * np.pi * 5 * t) + rng.normal(0, 0.03, t.shape)
+        ax.plot(t, amp)
+        ax.set_xlabel("時間 [s]")
+        ax.set_ylabel("応答振幅 [mm]")
+        ax.set_title(f"{spec.part} 応答波形")
+    elif spec.analysis_type == "疲労解析":
+        n = np.logspace(3, 7, 50)
+        s = 800 * n**-0.12 + rng.normal(0, 5, n.shape)
+        ax.loglog(n, s)
+        ax.set_xlabel("繰り返し数 N")
+        ax.set_ylabel("応力振幅 [MPa]")
+        ax.set_title(f"{spec.part} S-N線図")
+    else:
+        data = rng.normal(0, 1, (30, 30))
+        im = ax.imshow(data, cmap="jet")
+        fig.colorbar(im, ax=ax, label="相当応力 [MPa]")
+        ax.set_title(f"{spec.part} 応力分布")
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _generate_one_report(
+    client: LLMClient, spec: ReportSpec
+) -> tuple[dict[str, str], list[tuple[str, str]], bytes]:
+    """1件のレポートを生成し、(メタデータ, [(見出し, 本文), ...], 結果画像PNGバイト列) を返す。
 
     小型のローカルLLMは、指定した見出し構成を毎回厳密には守れないことがある
     （実際に60件中1件、見出し欠落で失敗する事例が起きた）。温度付き(0.7)サンプリング
@@ -253,7 +305,8 @@ def _generate_one_report(client: LLMClient, spec: ReportSpec) -> tuple[dict[str,
             last_error = exc
             print(f"{spec.report_id}: 生成/検証に失敗（{attempt}/{_MAX_GENERATION_ATTEMPTS}回目）: {exc}")
             continue
-        return _metadata_dict(spec), _split_sections(body)
+        image = _generate_result_image(spec)
+        return _metadata_dict(spec), _split_sections(body), image
 
     assert last_error is not None
     raise last_error
@@ -266,16 +319,27 @@ def _report_title(metadata: dict[str, str]) -> str:
     return f"{metadata['part']} {metadata['analysis_type']} 解析レポート（{metadata['report_id']}）"
 
 
-def _write_markdown(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+def _write_markdown(metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path) -> None:
+    image_path = path.with_suffix(".png")
+    image_path.write_bytes(image)
+
     lines = ["---", *(f"{key}: {metadata[key]}" for key in METADATA_FIELDS), "---", ""]
     header = "\n".join(lines)
     title = f"# {_report_title(metadata)}\n\n"
-    body = "\n\n".join(f"## {heading}\n{text}" for heading, text in sections) + "\n"
+    parts = []
+    for heading, text in sections:
+        if heading == RESULT_IMAGE_SECTION:
+            text = f"{text}\n\n![結果画像]({image_path.name})"
+        parts.append(f"## {heading}\n{text}")
+    body = "\n\n".join(parts) + "\n"
     path.write_text(header + title + body, encoding="utf-8")
 
 
-def _write_docx(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+def _write_docx(metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path) -> None:
+    import io
+
     from docx import Document
+    from docx.shared import Inches
 
     doc = Document()
     doc.add_heading(_report_title(metadata), level=1)
@@ -288,12 +352,17 @@ def _write_docx(metadata: dict[str, str], sections: list[tuple[str, str]], path:
     for heading, text in sections:
         doc.add_heading(heading, level=2)
         doc.add_paragraph(text)
+        if heading == RESULT_IMAGE_SECTION:
+            doc.add_picture(io.BytesIO(image), width=Inches(4))
 
     doc.save(str(path))
 
 
-def _write_xlsx(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+def _write_xlsx(metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path) -> None:
+    import io
+
     from openpyxl import Workbook
+    from openpyxl.drawing.image import Image as XLImage
 
     wb = Workbook()
     ws = wb.active
@@ -303,15 +372,25 @@ def _write_xlsx(metadata: dict[str, str], sections: list[tuple[str, str]], path:
         ws.cell(row=i, column=2, value=metadata[key])
 
     start_row = len(METADATA_FIELDS) + 2  # メタデータの後に1行空ける
+    image_anchor_row = start_row
     for offset, (heading, text) in enumerate(sections):
-        ws.cell(row=start_row + offset, column=1, value=heading)
-        ws.cell(row=start_row + offset, column=2, value=text)
+        row = start_row + offset
+        ws.cell(row=row, column=1, value=heading)
+        ws.cell(row=row, column=2, value=text)
+        if heading == RESULT_IMAGE_SECTION:
+            image_anchor_row = row
+
+    # C列以降は本文とかぶらないよう空けてあるので、そこに画像を差し込む。
+    ws.add_image(XLImage(io.BytesIO(image)), f"D{image_anchor_row}")
 
     wb.save(str(path))
 
 
-def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path) -> None:
+    import io
+
     from pptx import Presentation
+    from pptx.util import Inches
 
     prs = Presentation()
     layout = prs.slide_layouts[1]  # タイトル + コンテンツ
@@ -324,6 +403,8 @@ def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], path:
         slide = prs.slides.add_slide(layout)
         slide.shapes.title.text = heading
         slide.placeholders[1].text_frame.text = text
+        if heading == RESULT_IMAGE_SECTION:
+            slide.shapes.add_picture(io.BytesIO(image), Inches(5.2), Inches(1.6), width=Inches(4))
 
     prs.save(str(path))
 
@@ -349,7 +430,10 @@ def _pdf_lines(metadata: dict[str, str], sections: list[tuple[str, str]]) -> lis
     return lines
 
 
-def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], path: Path) -> None:
+def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path) -> None:
+    import io
+
+    from reportlab.lib.utils import ImageReader
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
     from reportlab.pdfgen import canvas
@@ -359,6 +443,8 @@ def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], path: 
         pdfmetrics.registerFont(UnicodeCIDFont(font_name))
 
     lines = _pdf_lines(metadata, sections)
+    image_reader = ImageReader(io.BytesIO(image))
+    img_width, img_height = 200, 140
 
     page_width, page_height = 595, 842  # A4 (pt)
     left_margin, top_margin, bottom_margin = 40, 800, 40
@@ -367,13 +453,34 @@ def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], path: 
     c = canvas.Canvas(str(path), pagesize=(page_width, page_height))
     y = top_margin
     c.setFont(font_name, font_size)
+
+    def _draw_image() -> None:
+        nonlocal y
+        if y - img_height < bottom_margin:
+            c.showPage()
+            c.setFont(font_name, font_size)
+            y = top_margin
+        c.drawImage(image_reader, left_margin, y - img_height, width=img_width, height=img_height)
+        y -= img_height + line_height
+
+    # 「## 結果サマリー」セクションの末尾（次の見出し行の直前、または全行の末尾）に画像を差し込む。
+    in_result_section = False
     for line in lines:
+        if line.startswith("## "):
+            if in_result_section:
+                _draw_image()
+            in_result_section = line[3:].strip() == RESULT_IMAGE_SECTION
+
         if y < bottom_margin:
             c.showPage()
             c.setFont(font_name, font_size)
             y = top_margin
         c.drawString(left_margin, y, line)
         y -= line_height
+
+    if in_result_section:
+        _draw_image()
+
     c.showPage()
     c.save()
 
@@ -392,21 +499,21 @@ def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) 
 
     # 全件のLLM生成が完了してからディスクに書き出す。途中のリクエストが失敗しても
     # 前回のデータセット（およびそれと対応するqa_pairs.json）を壊さないため。
-    generated: dict[str, tuple[dict[str, str], list[tuple[str, str]]]] = {}
+    generated: dict[str, tuple[dict[str, str], list[tuple[str, str]], bytes]] = {}
     for spec in specs:
         generated[spec.report_id] = _generate_one_report(client, spec)
         print(f"generated (in-memory): {spec.report_id}")
 
     # ここまで来て初めて、前回の生成物を一掃して書き出す。--count を減らして
     # 再実行したときに古いレポートが残り、今回のQAペアと矛盾したデータセットに
-    # なるのを防ぐ（対象は今回使いうる全フォーマットの拡張子）。
-    for fmt in FILE_FORMATS:
+    # なるのを防ぐ（対象は今回使いうる全フォーマットの拡張子＋Markdown用の画像png）。
+    for fmt in [*FILE_FORMATS, "png"]:
         for stale in out_dir.glob(f"RPT-*.{fmt}"):
             stale.unlink()
     for spec in specs:
-        metadata, sections = generated[spec.report_id]
+        metadata, sections, image = generated[spec.report_id]
         path = out_dir / f"{spec.report_id}.{spec.file_format}"
-        _WRITERS[spec.file_format](metadata, sections, path)
+        _WRITERS[spec.file_format](metadata, sections, image, path)
         print(f"wrote: {path}")
 
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cae_rag.ingest import build_chunks, parse_frontmatter, split_into_sections
+from cae_rag.ingest import RESULT_IMAGE_SECTION, _caption_image, build_chunks, parse_frontmatter, split_into_sections
+from cae_rag.llm_client import LLMConnectionError
 
 SAMPLE_REPORT = """---
 report_id: RPT-001
@@ -80,3 +81,82 @@ def test_build_chunks_ids_and_metadata(tmp_path):
         assert c.metadata["dept"] == "ボディ設計部"
         assert c.metadata["section"] in {"解析目的", "対象部品・製品カテゴリ", "メッシュ設定"}
         assert c.text.startswith(f"【{c.metadata['section']}】")
+
+
+SAMPLE_REPORT_WITH_IMAGE = f"""---
+report_id: RPT-002
+dept: ボディ設計部
+analysis_type: 静解析（線形）
+part: フロントドアパネル
+solver: Abaqus
+material: 高張力鋼板(980MPa級)
+author: 担当者A
+date: 2023-01-01
+---
+# タイトル
+
+## 解析目的
+本文。
+
+## {RESULT_IMAGE_SECTION}
+結果の説明文。
+
+![結果画像](RPT-002.png)
+"""
+
+
+class _FakeVLMClient:
+    """describe_imageだけを持つフェイク。実際のLM Studio接続は使わない。"""
+
+    def __init__(self, caption: str | None = None, raise_error: bool = False):
+        self._caption = caption
+        self._raise_error = raise_error
+        self.calls = 0
+
+    def describe_image(self, image: bytes, prompt: str) -> str:
+        self.calls += 1
+        if self._raise_error:
+            raise LLMConnectionError("VLM未ロード")
+        assert self._caption is not None
+        return self._caption
+
+
+def test_build_chunks_reads_sibling_image_and_strips_markdown_syntax(tmp_path):
+    report_path = tmp_path / "RPT-002.md"
+    report_path.write_text(SAMPLE_REPORT_WITH_IMAGE, encoding="utf-8")
+    (tmp_path / "RPT-002.png").write_bytes(b"fake-png-bytes")
+
+    chunks = build_chunks(report_path)  # client=None -> キャプション化しない
+
+    result_chunk = next(c for c in chunks if c.metadata["section"] == RESULT_IMAGE_SECTION)
+    assert "[結果画像の説明]" not in result_chunk.text
+    assert "![結果画像]" not in result_chunk.text  # 画像記法は本文チャンクから取り除かれる
+    assert "結果の説明文。" in result_chunk.text
+
+
+def test_build_chunks_merges_vlm_caption_into_result_section(tmp_path):
+    report_path = tmp_path / "RPT-002.md"
+    report_path.write_text(SAMPLE_REPORT_WITH_IMAGE, encoding="utf-8")
+    (tmp_path / "RPT-002.png").write_bytes(b"fake-png-bytes")
+
+    client = _FakeVLMClient(caption="応力が端部に集中している。")
+    chunks = build_chunks(report_path, client)
+
+    result_chunk = next(c for c in chunks if c.metadata["section"] == RESULT_IMAGE_SECTION)
+    assert client.calls == 1
+    assert "[結果画像の説明] 応力が端部に集中している。" in result_chunk.text
+
+
+def test_build_chunks_skips_captioning_when_no_image_present(tmp_path):
+    report_path = tmp_path / "RPT-001.md"
+    report_path.write_text(SAMPLE_REPORT, encoding="utf-8")
+
+    client = _FakeVLMClient(caption="呼ばれないはず")
+    build_chunks(report_path, client)
+
+    assert client.calls == 0  # 画像が無いレポートではVLMを呼ばない
+
+
+def test_caption_image_returns_none_on_llm_connection_error():
+    client = _FakeVLMClient(raise_error=True)
+    assert _caption_image(client, b"data") is None
