@@ -128,13 +128,17 @@ def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
         sections.append((current_heading, "\n".join(current_lines).strip()))
 
     # レポート1件につき画像は最大1枚（datagen._write_docx参照）なので、
-    # 最初のインライン画像をそのまま結果画像として扱う。
+    # 最初に見つかった画像リレーションシップをそのまま結果画像として扱う。
+    # InlineShapeには`.image`属性が無い（python-docxの実際のAPIと異なっていた）ため、
+    # ドキュメントのリレーションシップから直接画像パートを辿る。
     image: bytes | None = None
-    if doc.inline_shapes:
-        try:
-            image = doc.inline_shapes[0].image.blob
-        except Exception as exc:  # noqa: BLE001 - 画像取得の失敗はテキスト取り込みを止めない
-            print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
+    try:
+        for rel in doc.part.rels.values():
+            if "image" in rel.reltype:
+                image = rel.target_part.blob
+                break
+    except Exception as exc:  # noqa: BLE001 - 画像取得の失敗はテキスト取り込みを止めない
+        print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
     return meta, sections, image
 
 
@@ -169,15 +173,14 @@ def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
         value = row[1] if len(row) > 1 else None
         sections.append((heading, "" if value is None else str(value)))
 
+    # `.ref`はPIL Imageだと想定していたが、実際にはBytesIO（`.save()`を持たない）で
+    # 返ってくることが確認された。`_data()`はopenpyxl自身が書き出し時に使う、生バイト列を
+    # 返すメソッドなので、`.ref`の内部表現に依存せずこちらを使う。
     image: bytes | None = None
     embedded_images = getattr(ws, "_images", [])
     if embedded_images:
         try:
-            import io
-
-            buf = io.BytesIO()
-            embedded_images[0].ref.save(buf, format="PNG")
-            image = buf.getvalue()
+            image = embedded_images[0]._data()
         except Exception as exc:  # noqa: BLE001 - 画像取得の失敗はテキスト取り込みを止めない
             print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
     return meta, sections, image
