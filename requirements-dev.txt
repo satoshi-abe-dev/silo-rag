@@ -1,5 +1,0 @@
-# 実行時の依存関係は pyproject.toml の [project.dependencies] にあり、
-# `pip install -e .` で入る。このファイルはdevツール（テスト・lint）のみ追加する。
-pytest>=8.0
-ruff>=0.6
-mypy>=1.11

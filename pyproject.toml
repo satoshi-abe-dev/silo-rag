@@ -1,6 +1,7 @@
 # src レイアウトのパッケージを `pip install -e .` で解決できるようにする最小限の
 # build-system/project設定。`python -m cae_rag.xxx` をリポジトリ直下からそのまま
 # 実行できるようにするための最小限の設定（`pythonpath` はpytest専用で他には効かない）。
+# 依存関係（本番用・開発用とも）はここが一次情報。別途requirements*.txtは置かない。
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -15,6 +16,10 @@ dependencies = [
     "rank_bm25>=0.2",
     "streamlit>=1.38",
 ]
+
+[project.optional-dependencies]
+# `pip install -e ".[dev]"` でテスト・lintツールも含めて導入する。
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

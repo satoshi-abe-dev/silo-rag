@@ -51,7 +51,7 @@ retrieval（C）とgeneration（D）は互いに依存せず、どちらも `ing
 ```bash
 pip install -e .
 # 開発（テスト・lint）も行う場合
-pip install -r requirements-dev.txt
+pip install -e ".[dev]"
 ```
 
 ### 設定
