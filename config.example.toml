@@ -1,0 +1,15 @@
+# このファイルを config.toml にコピーして使う（config.toml は .gitignore 対象）。
+# 未設定の項目はコード内のデフォルト値が使われる。
+
+[llm]
+base_url = "http://localhost:1234/v1"
+api_key = "local-no-key"
+model = "qwen2.5-7b-instruct"
+embed_model = "text-embedding-nomic-embed-text-v1.5"
+timeout = 300.0
+max_tokens = 2048
+
+[retrieval]
+vector_weight = 0.5
+top_k_candidates = 20
+top_k_final = 5

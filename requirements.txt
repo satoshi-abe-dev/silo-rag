@@ -1,0 +1,6 @@
+# pip install -e . でも同じ依存関係が入る（pyproject.toml の [project.dependencies]）。
+# このファイルは pip install -e . を使わない場合の参照用。
+httpx>=0.27
+chromadb>=0.5
+rank_bm25>=0.2
+streamlit>=1.38

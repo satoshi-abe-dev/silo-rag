@@ -1,0 +1,18 @@
+# 個人設定（config.example.toml をコピーしたもの。ローカルLLMのURL等が入りうる）
+config.toml
+
+# 実行時に生成されるベクトルDB（ingestスクリプトで再生成可能なので追跡しない）
+data/chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.venv*/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
