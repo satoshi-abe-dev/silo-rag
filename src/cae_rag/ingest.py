@@ -17,7 +17,7 @@ PowerPointなら1枚目のスライド、PDFなら先頭のテキスト）から
 
 各レポートには「結果サマリー」セクションに1枚だけ結果画像（グラフ/コンター図）が
 埋め込まれている想定。ファイル形式ごとの方法で画像を取り出し、LM StudioのVLM
-（config.llm.vlm_model）でキャプション化して、対応するチャンクの検索対象テキストに
+（config.server.vlm_model）でキャプション化して、対応するチャンクの検索対象テキストに
 追記する（画像の内容も検索できるようにするため）。VLM未ロード等で失敗しても、
 その画像のキャプションが無いだけでテキスト取り込み自体は続行する。
 """
@@ -234,31 +234,35 @@ def _parse_pdf_text(full_text: str) -> tuple[dict[str, str], list[tuple[str, str
     持たないため、他形式と違いテキストパターン頼みの抽出になる（実務のPDF取り込みでも
     よくある制約）。pypdfからのテキスト抽出処理と分離してあるので、pypdf/reportlabが
     無い環境でも datagen._pdf_lines() の出力を直接渡して往復ロジックをテストできる。
+
+    メタデータとセクション本文の境目は「最初の`## `見出し行」で判定する（空行の有無は
+    見ない）。当初は「メタデータ行の直後にある空行」を区切りにしていたが、実際にpypdfで
+    抽出したテキストでは、drawStringを呼ばずにy座標だけ送った空行がテキストとして
+    残らないことがあり、区切りの空行が消えて全セクションが読めなくなる実例が
+    見つかったため（60件中9件のPDFで発生）、空行に依存しない実装に変更した。
     """
     lines = full_text.split("\n")
 
     meta: dict[str, str] = {}
-    idx = 0
-    while idx < len(lines) and lines[idx].strip():
-        line = lines[idx].strip()
-        if ":" in line:
-            key, _, value = line.partition(":")
-            meta[key.strip()] = value.strip()
-        idx += 1
-    idx += 1  # 区切りの空行をスキップ
-
     sections: list[tuple[str, str]] = []
     current_heading: str | None = None
     current_lines: list[str] = []
-    for line in lines[idx:]:
+
+    for line in lines:
         stripped = line.strip()
         if stripped.startswith("## "):
             if current_heading is not None:
                 sections.append((current_heading, "\n".join(current_lines).strip()))
             current_heading = stripped[3:].strip()
             current_lines = []
-        elif current_heading is not None and stripped:
+        elif current_heading is None:
+            # 最初の見出し行にまだ到達していない = メタデータ部分。
+            if ":" in stripped:
+                key, _, value = stripped.partition(":")
+                meta[key.strip()] = value.strip()
+        elif stripped:
             current_lines.append(stripped)
+
     if current_heading is not None:
         sections.append((current_heading, "\n".join(current_lines).strip()))
     return meta, sections
@@ -362,10 +366,10 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
     chroma_dir.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(chroma_dir))
 
-    with LLMClient(config.llm) as llm_client:
+    with LLMClient(config.server) as llm_client:
         if not llm_client.ping():
             raise SystemExit(
-                f"LM Studio ({config.llm.base_url}) に接続できません。起動してモデルをロードしてください。"
+                f"LM Studio ({config.server.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
 
         # チャンク構築（埋め込み画像があればここでVLMキャプション化も行う）は、

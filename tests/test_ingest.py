@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from cae_rag.ingest import RESULT_IMAGE_SECTION, _caption_image, build_chunks, parse_frontmatter, split_into_sections
+from cae_rag.ingest import (
+    RESULT_IMAGE_SECTION,
+    _caption_image,
+    _parse_pdf_text,
+    build_chunks,
+    parse_frontmatter,
+    split_into_sections,
+)
 from cae_rag.llm_client import LLMConnectionError
 
 SAMPLE_REPORT = """---
@@ -160,3 +167,29 @@ def test_build_chunks_skips_captioning_when_no_image_present(tmp_path):
 def test_caption_image_returns_none_on_llm_connection_error():
     client = _FakeVLMClient(raise_error=True)
     assert _caption_image(client, b"data") is None
+
+
+def test_parse_pdf_text_basic():
+    text = "report_id: RPT-041\ndept: パワートレイン設計部\n\n## 解析目的\n本文A\n\n## 結果サマリー\n本文B\n"
+    meta, sections = _parse_pdf_text(text)
+    assert meta == {"report_id": "RPT-041", "dept": "パワートレイン設計部"}
+    assert sections == [("解析目的", "本文A"), ("結果サマリー", "本文B")]
+
+
+def test_parse_pdf_text_does_not_depend_on_blank_line_separator():
+    """退行テスト: 実際にreportlabで生成したPDFをpypdfで抽出すると、drawStringを
+    呼ばなかった空行がテキストに残らず、メタデータとセクションの区切りの空行が
+    消えることがある（60件中9件のPDFでゼロセクションになる実例が見つかった）。
+    空行の有無に依存しない実装になっていることを確認する。"""
+    text = "report_id: RPT-041\ndept: パワートレイン設計部\n## 解析目的\n本文A\n## 結果サマリー\n本文B\n"
+    meta, sections = _parse_pdf_text(text)
+    assert meta == {"report_id": "RPT-041", "dept": "パワートレイン設計部"}
+    assert sections == [("解析目的", "本文A"), ("結果サマリー", "本文B")]
+
+
+def test_parse_pdf_text_empty_metadata_line_is_harmless():
+    # メタデータ部分に複数の空行が挟まっても問題なく無視される。
+    text = "report_id: RPT-001\n\n\ndept: ボディ設計部\n## 解析目的\n本文\n"
+    meta, sections = _parse_pdf_text(text)
+    assert meta == {"report_id": "RPT-001", "dept": "ボディ設計部"}
+    assert sections == [("解析目的", "本文")]

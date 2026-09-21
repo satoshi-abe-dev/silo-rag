@@ -44,7 +44,15 @@ COLLECTION_NAME = "cae_reports"
 
 
 @dataclass
-class LLMConfig:
+class ServerConfig:
+    """LM Studio等、ローカルモデルサーバーへの接続設定＋そこから使う3種類のモデル指定。
+
+    base_url/api_key/timeout/max_tokensは接続・リクエストの設定、
+    model/embed_model/vlm_modelは「同じサーバーのどのモデルを使うか」の指定。
+    どれも同じサーバー（同じbase_url）へのリクエストなので1つのセクションにまとめている
+    （役割ごとにサーバー自体を分けたい場合は、このdataclass自体を分割する必要がある）。
+    """
+
     base_url: str = "http://localhost:1234/v1"
     api_key: str = "local-no-key"
     # チャット/生成用モデル。
@@ -69,25 +77,25 @@ class RetrievalConfig:
 
 @dataclass
 class Config:
-    llm: LLMConfig = field(default_factory=LLMConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
 
 
 _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
-    "CAERAG_LLM_BASE_URL": ("llm", "base_url", str),
-    "CAERAG_LLM_API_KEY": ("llm", "api_key", str),
-    "CAERAG_LLM_MODEL": ("llm", "model", str),
-    "CAERAG_LLM_EMBED_MODEL": ("llm", "embed_model", str),
-    "CAERAG_LLM_VLM_MODEL": ("llm", "vlm_model", str),
-    "CAERAG_LLM_TIMEOUT": ("llm", "timeout", float),
-    "CAERAG_LLM_MAX_TOKENS": ("llm", "max_tokens", int),
+    "CAERAG_SERVER_BASE_URL": ("server", "base_url", str),
+    "CAERAG_SERVER_API_KEY": ("server", "api_key", str),
+    "CAERAG_SERVER_MODEL": ("server", "model", str),
+    "CAERAG_SERVER_EMBED_MODEL": ("server", "embed_model", str),
+    "CAERAG_SERVER_VLM_MODEL": ("server", "vlm_model", str),
+    "CAERAG_SERVER_TIMEOUT": ("server", "timeout", float),
+    "CAERAG_SERVER_MAX_TOKENS": ("server", "max_tokens", int),
     "CAERAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),
     "CAERAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
     "CAERAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
 }
 
 _SECTION_TYPES = {
-    "llm": LLMConfig,
+    "server": ServerConfig,
     "retrieval": RetrievalConfig,
 }
 
@@ -139,6 +147,16 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     if toml_path is not None:
         with open(toml_path, "rb") as f:
             data = tomllib.load(f)
+
+    # 旧セクション名"[llm]"（"[server]"へのリネーム前）が残っていると、設定が
+    # 黙って全部デフォルト値に戻ってしまう（"server"キーが無いだけなので例外にならない）。
+    # 気づかないまま意図しないモデル・接続先で動いてしまうのを防ぐため警告する。
+    if "llm" in data and "server" not in data:
+        print(
+            "警告: config.tomlの[llm]セクションは[server]にリネームされました。"
+            "config.example.tomlを参照して[server]に書き換えてください"
+            "（このままだとconfig.tomlの内容は無視され、コード内のデフォルト値が使われます）。"
+        )
 
     sections: dict[str, object] = {}
     for name, cls in _SECTION_TYPES.items():

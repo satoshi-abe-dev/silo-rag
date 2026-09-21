@@ -1,7 +1,7 @@
 # このファイルを config.toml にコピーして使う（config.toml は .gitignore 対象）。
 # 未設定の項目はコード内のデフォルト値が使われる。
 
-[llm]
+[server]
 base_url = "http://localhost:1234/v1"
 api_key = "local-no-key"
 model = "qwen2.5-7b-instruct"

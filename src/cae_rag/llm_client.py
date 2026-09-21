@@ -1,7 +1,7 @@
 """ローカル LLM / 埋め込み / VLM サーバー（LM Studio 等）への OpenAI 互換クライアント。
 
 `/chat/completions`（テキスト・画像入力とも） と `/embeddings` を httpx で直接叩くだけ。
-openai パッケージには依存しない。接続先は config.llm.base_url。既定は LM Studio の
+openai パッケージには依存しない。接続先は config.server.base_url。既定は LM Studio の
 http://localhost:1234/v1。Ollama など OpenAI 互換 API を出す他基盤に差し替えても動く。
 
 外部ネットワークへは接続しない（base_url が localhost 前提）。
@@ -11,7 +11,7 @@ meeting-minutes プロジェクト（src/meeting_minutes/model/llm_client.py）�
 
 from __future__ import annotations
 
-from .config import LLMConfig
+from .config import ServerConfig
 
 
 class LLMConnectionError(RuntimeError):
@@ -19,7 +19,7 @@ class LLMConnectionError(RuntimeError):
 
 
 class LLMClient:
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: ServerConfig):
         self.config = config
         import httpx
 

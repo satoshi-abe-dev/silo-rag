@@ -84,7 +84,7 @@ def _judge_answer(client: LLMClient, question: str, gold_evidence: list[str], an
         "評価(1〜5の整数のみ):"
     )
     try:
-        # max_tokensは指定しない（config.llm.max_tokensのデフォルトに従う）。推論モデルは
+        # max_tokensは指定しない（config.server.max_tokensのデフォルトに従う）。推論モデルは
         # 可視の回答を書く前に思考トークンを消費するため、ここで小さい値を決め打ちすると
         # 思考だけで使い切り、LLMClient側の「本文が空」検出でエラーになり得る
         # （すべての評価がNoneになりかねない）。
@@ -184,10 +184,10 @@ def main() -> None:
 
     qa_pairs = _load_qa_pairs(args.qa_file)
     config = load_config()
-    with LLMClient(config.llm) as client:
+    with LLMClient(config.server) as client:
         if not client.ping():
             raise SystemExit(
-                f"LM Studio ({config.llm.base_url}) に接続できません。起動してモデルをロードしてください。"
+                f"LM Studio ({config.server.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
         results = run_eval(client, qa_pairs, top_k=args.top_k)
 
