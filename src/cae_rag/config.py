@@ -44,13 +44,26 @@ COLLECTION_NAME = "cae_reports"
 
 
 @dataclass
-class LLMConfig:
+class AIConfig:
+    """LM Studio等、ローカルモデルサーバーへの接続設定＋そこから使う3種類のモデル指定。
+
+    base_url/api_key/timeout/max_tokensは接続・リクエストの設定、
+    llm_model/embed_model/vlm_modelは「同じサーバーのどのモデルを使うか」の指定
+    （役割ごとに名前を揃えてある）。どれも同じサーバー（同じbase_url）へのリクエストなので
+    1つのセクションにまとめている（役割ごとにサーバー自体を分けたい場合は、この
+    dataclass自体を分割する必要がある）。
+    """
+
     base_url: str = "http://localhost:1234/v1"
     api_key: str = "local-no-key"
     # チャット/生成用モデル。
-    model: str = "qwen2.5-7b-instruct"
+    llm_model: str = "qwen2.5-7b-instruct"
     # 埋め込み用モデル。LM Studio に埋め込みモデルをロードしておく必要がある。
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"
+    # 画像説明（VLM）用モデル。LM Studio にvisionモデルをロードしておく必要がある
+    # （例: Qwen2.5-VL / Qwen3-VL系）。未ロードでも他機能には影響しない
+    # （画像キャプション取得に失敗した場合はログを出して該当画像をスキップするのみ）。
+    vlm_model: str = "qwen2.5-vl-7b-instruct"
     timeout: float = 300.0
     max_tokens: int = 2048
 
@@ -65,24 +78,25 @@ class RetrievalConfig:
 
 @dataclass
 class Config:
-    llm: LLMConfig = field(default_factory=LLMConfig)
+    ai: AIConfig = field(default_factory=AIConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
 
 
 _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
-    "CAERAG_LLM_BASE_URL": ("llm", "base_url", str),
-    "CAERAG_LLM_API_KEY": ("llm", "api_key", str),
-    "CAERAG_LLM_MODEL": ("llm", "model", str),
-    "CAERAG_LLM_EMBED_MODEL": ("llm", "embed_model", str),
-    "CAERAG_LLM_TIMEOUT": ("llm", "timeout", float),
-    "CAERAG_LLM_MAX_TOKENS": ("llm", "max_tokens", int),
+    "CAERAG_AI_BASE_URL": ("ai", "base_url", str),
+    "CAERAG_AI_API_KEY": ("ai", "api_key", str),
+    "CAERAG_AI_LLM_MODEL": ("ai", "llm_model", str),
+    "CAERAG_AI_EMBED_MODEL": ("ai", "embed_model", str),
+    "CAERAG_AI_VLM_MODEL": ("ai", "vlm_model", str),
+    "CAERAG_AI_TIMEOUT": ("ai", "timeout", float),
+    "CAERAG_AI_MAX_TOKENS": ("ai", "max_tokens", int),
     "CAERAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),
     "CAERAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
     "CAERAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
 }
 
 _SECTION_TYPES = {
-    "llm": LLMConfig,
+    "ai": AIConfig,
     "retrieval": RetrievalConfig,
 }
 
@@ -134,6 +148,28 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     if toml_path is not None:
         with open(toml_path, "rb") as f:
             data = tomllib.load(f)
+
+    # 旧セクション名（"[ai]"へのリネーム前）が残っていると、設定が黙って全部
+    # デフォルト値に戻ってしまう（"ai"キーが無いだけなので例外にならない）。
+    # "[llm]"（最初期の名前）と"[server]"（"[ai]"に決める前に一時的に案内した名前）の
+    # どちらが残っていても気づけるよう、両方チェックする。
+    legacy_sections = [name for name in ("llm", "server") if name in data]
+    if legacy_sections and "ai" not in data:
+        print(
+            f"警告: config.tomlの{[f'[{n}]' for n in legacy_sections]}セクションは[ai]にリネームされました。"
+            "config.example.tomlを参照して[ai]に書き換えてください"
+            "（このままだとconfig.tomlの内容は無視され、コード内のデフォルト値が使われます）。"
+        )
+
+    # セクション名は[ai]に直しても、中の"model"キー（現在は"llm_model"）を
+    # リネームし忘れると同様に黙って無視される。こちらも個別に警告する。
+    ai_section = data.get("ai") or data.get("server") or data.get("llm") or {}
+    if isinstance(ai_section, dict) and "model" in ai_section and "llm_model" not in ai_section:
+        print(
+            "警告: config.tomlの`model`キーは`llm_model`にリネームされました。"
+            "config.example.tomlを参照して書き換えてください"
+            "（このままだと指定したモデル名は無視され、コード内のデフォルト値が使われます）。"
+        )
 
     sections: dict[str, object] = {}
     for name, cls in _SECTION_TYPES.items():
