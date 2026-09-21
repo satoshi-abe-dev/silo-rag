@@ -17,7 +17,7 @@ PowerPointなら1枚目のスライド、PDFなら先頭のテキスト）から
 
 各レポートには「結果サマリー」セクションに1枚だけ結果画像（グラフ/コンター図）が
 埋め込まれている想定。ファイル形式ごとの方法で画像を取り出し、LM StudioのVLM
-（config.server.vlm_model）でキャプション化して、対応するチャンクの検索対象テキストに
+（config.ai.vlm_model）でキャプション化して、対応するチャンクの検索対象テキストに
 追記する（画像の内容も検索できるようにするため）。VLM未ロード等で失敗しても、
 その画像のキャプションが無いだけでテキスト取り込み自体は続行する。
 """
@@ -366,10 +366,10 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
     chroma_dir.mkdir(parents=True, exist_ok=True)
     client = chromadb.PersistentClient(path=str(chroma_dir))
 
-    with LLMClient(config.server) as llm_client:
+    with LLMClient(config.ai) as llm_client:
         if not llm_client.ping():
             raise SystemExit(
-                f"LM Studio ({config.server.base_url}) に接続できません。起動してモデルをロードしてください。"
+                f"LM Studio ({config.ai.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
 
         # チャンク構築（埋め込み画像があればここでVLMキャプション化も行う）は、

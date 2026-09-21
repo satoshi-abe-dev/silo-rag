@@ -26,7 +26,7 @@ st.set_page_config(page_title="CAE解析ナレッジ検索", page_icon="🔧")
 @st.cache_resource
 def get_client() -> LLMClient:
     config = load_config()
-    return LLMClient(config.server)
+    return LLMClient(config.ai)
 
 
 def _filter_widgets() -> dict[str, str]:
@@ -67,7 +67,7 @@ def main() -> None:
     client = get_client()
     if not client.ping():
         st.error(
-            f"LM Studio ({load_config().server.base_url}) に接続できません。"
+            f"LM Studio ({load_config().ai.base_url}) に接続できません。"
             "起動してモデルをロードしてから再読み込みしてください。"
         )
         st.stop()

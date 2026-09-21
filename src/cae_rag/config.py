@@ -44,7 +44,7 @@ COLLECTION_NAME = "cae_reports"
 
 
 @dataclass
-class ServerConfig:
+class AIConfig:
     """LM Studio等、ローカルモデルサーバーへの接続設定＋そこから使う3種類のモデル指定。
 
     base_url/api_key/timeout/max_tokensは接続・リクエストの設定、
@@ -77,25 +77,25 @@ class RetrievalConfig:
 
 @dataclass
 class Config:
-    server: ServerConfig = field(default_factory=ServerConfig)
+    ai: AIConfig = field(default_factory=AIConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
 
 
 _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
-    "CAERAG_SERVER_BASE_URL": ("server", "base_url", str),
-    "CAERAG_SERVER_API_KEY": ("server", "api_key", str),
-    "CAERAG_SERVER_MODEL": ("server", "model", str),
-    "CAERAG_SERVER_EMBED_MODEL": ("server", "embed_model", str),
-    "CAERAG_SERVER_VLM_MODEL": ("server", "vlm_model", str),
-    "CAERAG_SERVER_TIMEOUT": ("server", "timeout", float),
-    "CAERAG_SERVER_MAX_TOKENS": ("server", "max_tokens", int),
+    "CAERAG_AI_BASE_URL": ("ai", "base_url", str),
+    "CAERAG_AI_API_KEY": ("ai", "api_key", str),
+    "CAERAG_AI_MODEL": ("ai", "model", str),
+    "CAERAG_AI_EMBED_MODEL": ("ai", "embed_model", str),
+    "CAERAG_AI_VLM_MODEL": ("ai", "vlm_model", str),
+    "CAERAG_AI_TIMEOUT": ("ai", "timeout", float),
+    "CAERAG_AI_MAX_TOKENS": ("ai", "max_tokens", int),
     "CAERAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),
     "CAERAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
     "CAERAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
 }
 
 _SECTION_TYPES = {
-    "server": ServerConfig,
+    "ai": AIConfig,
     "retrieval": RetrievalConfig,
 }
 
@@ -148,13 +148,15 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         with open(toml_path, "rb") as f:
             data = tomllib.load(f)
 
-    # 旧セクション名"[llm]"（"[server]"へのリネーム前）が残っていると、設定が
-    # 黙って全部デフォルト値に戻ってしまう（"server"キーが無いだけなので例外にならない）。
-    # 気づかないまま意図しないモデル・接続先で動いてしまうのを防ぐため警告する。
-    if "llm" in data and "server" not in data:
+    # 旧セクション名（"[ai]"へのリネーム前）が残っていると、設定が黙って全部
+    # デフォルト値に戻ってしまう（"ai"キーが無いだけなので例外にならない）。
+    # "[llm]"（最初期の名前）と"[server]"（"[ai]"に決める前に一時的に案内した名前）の
+    # どちらが残っていても気づけるよう、両方チェックする。
+    legacy_sections = [name for name in ("llm", "server") if name in data]
+    if legacy_sections and "ai" not in data:
         print(
-            "警告: config.tomlの[llm]セクションは[server]にリネームされました。"
-            "config.example.tomlを参照して[server]に書き換えてください"
+            f"警告: config.tomlの{[f'[{n}]' for n in legacy_sections]}セクションは[ai]にリネームされました。"
+            "config.example.tomlを参照して[ai]に書き換えてください"
             "（このままだとconfig.tomlの内容は無視され、コード内のデフォルト値が使われます）。"
         )
 

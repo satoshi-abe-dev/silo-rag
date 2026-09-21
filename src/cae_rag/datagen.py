@@ -609,10 +609,10 @@ def main() -> None:
     specs = generate_report_specs(args.count, seed=args.seed)
 
     config = load_config()
-    with LLMClient(config.server) as client:
+    with LLMClient(config.ai) as client:
         if not client.ping():
             raise SystemExit(
-                f"LM Studio ({config.server.base_url}) に接続できません。起動してモデルをロードしてください。"
+                f"LM Studio ({config.ai.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
         generate_reports(client, specs, args.out_dir)
 
