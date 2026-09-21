@@ -48,15 +48,16 @@ class AIConfig:
     """LM Studio等、ローカルモデルサーバーへの接続設定＋そこから使う3種類のモデル指定。
 
     base_url/api_key/timeout/max_tokensは接続・リクエストの設定、
-    model/embed_model/vlm_modelは「同じサーバーのどのモデルを使うか」の指定。
-    どれも同じサーバー（同じbase_url）へのリクエストなので1つのセクションにまとめている
-    （役割ごとにサーバー自体を分けたい場合は、このdataclass自体を分割する必要がある）。
+    llm_model/embed_model/vlm_modelは「同じサーバーのどのモデルを使うか」の指定
+    （役割ごとに名前を揃えてある）。どれも同じサーバー（同じbase_url）へのリクエストなので
+    1つのセクションにまとめている（役割ごとにサーバー自体を分けたい場合は、この
+    dataclass自体を分割する必要がある）。
     """
 
     base_url: str = "http://localhost:1234/v1"
     api_key: str = "local-no-key"
     # チャット/生成用モデル。
-    model: str = "qwen2.5-7b-instruct"
+    llm_model: str = "qwen2.5-7b-instruct"
     # 埋め込み用モデル。LM Studio に埋め込みモデルをロードしておく必要がある。
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"
     # 画像説明（VLM）用モデル。LM Studio にvisionモデルをロードしておく必要がある
@@ -84,7 +85,7 @@ class Config:
 _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "CAERAG_AI_BASE_URL": ("ai", "base_url", str),
     "CAERAG_AI_API_KEY": ("ai", "api_key", str),
-    "CAERAG_AI_MODEL": ("ai", "model", str),
+    "CAERAG_AI_LLM_MODEL": ("ai", "llm_model", str),
     "CAERAG_AI_EMBED_MODEL": ("ai", "embed_model", str),
     "CAERAG_AI_VLM_MODEL": ("ai", "vlm_model", str),
     "CAERAG_AI_TIMEOUT": ("ai", "timeout", float),
@@ -158,6 +159,16 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
             f"警告: config.tomlの{[f'[{n}]' for n in legacy_sections]}セクションは[ai]にリネームされました。"
             "config.example.tomlを参照して[ai]に書き換えてください"
             "（このままだとconfig.tomlの内容は無視され、コード内のデフォルト値が使われます）。"
+        )
+
+    # セクション名は[ai]に直しても、中の"model"キー（現在は"llm_model"）を
+    # リネームし忘れると同様に黙って無視される。こちらも個別に警告する。
+    ai_section = data.get("ai") or data.get("server") or data.get("llm") or {}
+    if isinstance(ai_section, dict) and "model" in ai_section and "llm_model" not in ai_section:
+        print(
+            "警告: config.tomlの`model`キーは`llm_model`にリネームされました。"
+            "config.example.tomlを参照して書き換えてください"
+            "（このままだと指定したモデル名は無視され、コード内のデフォルト値が使われます）。"
         )
 
     sections: dict[str, object] = {}

@@ -63,7 +63,7 @@ pip install -e ".[dev]"
 cp config.example.toml config.toml
 ```
 
-`config.toml` でLM StudioのベースURL・モデル名を調整してください（環境変数 `CAERAG_AI_MODEL` 等でも上書き可能。詳細は `src/cae_rag/config.py` 参照）。
+`config.toml` でLM StudioのベースURL・モデル名を調整してください（環境変数 `CAERAG_AI_LLM_MODEL` 等でも上書き可能。詳細は `src/cae_rag/config.py` 参照）。
 
 ## 使い方
 

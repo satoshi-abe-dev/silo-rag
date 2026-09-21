@@ -108,7 +108,7 @@ class LLMClient:
     ) -> str:
         """テキストのみのチャット補完。合成データ生成や回答生成に使う。"""
         payload = {
-            "model": model or self.config.model,
+            "model": model or self.config.llm_model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
