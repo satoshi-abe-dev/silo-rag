@@ -84,9 +84,20 @@ def main() -> None:
             st.write(answer.text)
             _render_citations(answer, scored)
 
-    question = st.chat_input("質問を入力してください（例: アルミ製ブラケットの固有値解析で共振を避けたい）")
-    if not question:
+    # st.chat_input はEnterキーで即送信する設計のため、日本語入力時に漢字変換を
+    # 確定するEnterまで送信トリガーになってしまう（IME変換とキー入力が競合する、
+    # CJK言語でよく報告される既知の問題）。st.text_area + 送信ボタンのフォームに
+    # すれば、Enterは改行にしかならず変換確定と送信を安全に分離できる。
+    with st.form("question_form", clear_on_submit=True):
+        question = st.text_area(
+            "質問を入力してください（例: アルミ製ブラケットの固有値解析で共振を避けたい）",
+            height=80,
+        )
+        submitted = st.form_submit_button("送信")
+
+    if not submitted or not question.strip():
         return
+    question = question.strip()
 
     with st.chat_message("user"):
         st.write(question)
