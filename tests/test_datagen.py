@@ -9,6 +9,7 @@ from cae_rag.datagen import (
     DEPARTMENTS,
     DEPT_TERMINOLOGY,
     ReportSpec,
+    _generate_one_report,
     _validate_report_body,
     build_prompt,
     generate_eval_qa,
@@ -146,3 +147,42 @@ def test_generate_eval_qa_same_dept_question_gold_dept_matches_asking_dept():
         # （同一(部品,解析種別)の中には他部署のレポートも混ざりうるため、asking_dept自身の
         # レポートが正解集合に含まれることだけを確認する）。
         assert any(ref["dept"] == qa["asking_dept"] for ref in qa["gold_references"])
+
+
+class _ScriptedClient:
+    """.chatが呼ばれるたびに、あらかじめ用意した本文を順番に返すフェイク。
+    実際にLM Studioに繋がっていないと再現しづらい「検証失敗→リトライで成功」
+    パターンをテストするために使う。"""
+
+    def __init__(self, bodies: list[str]):
+        self._bodies = list(bodies)
+        self.call_count = 0
+
+    def chat(self, *args, **kwargs) -> str:
+        self.call_count += 1
+        return self._bodies.pop(0)
+
+
+def test_generate_one_report_retries_after_validation_failure():
+    spec = _make_spec()
+    headings = _required_headings(spec)
+    invalid_body = "\n\n".join(f"## {h}\n本文" for h in headings[:-1])  # 1見出し欠落
+    valid_body = _valid_body(spec)
+
+    client = _ScriptedClient([invalid_body, valid_body])
+    content = _generate_one_report(client, spec)
+
+    assert client.call_count == 2  # 1回目失敗、2回目で成功
+    assert content.strip().endswith("本文がここに入ります。")
+
+
+def test_generate_one_report_raises_after_exhausting_retries():
+    spec = _make_spec()
+    headings = _required_headings(spec)
+    invalid_body = "\n\n".join(f"## {h}\n本文" for h in headings[:-1])
+
+    client = _ScriptedClient([invalid_body, invalid_body, invalid_body, "この4回目は呼ばれないはず"])
+    with pytest.raises(LLMConnectionError):
+        _generate_one_report(client, spec)
+
+    assert client.call_count == 3  # _MAX_GENERATION_ATTEMPTS=3で打ち切られる

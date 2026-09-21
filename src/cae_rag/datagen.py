@@ -206,6 +206,34 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
             raise LLMConnectionError(f"{spec.report_id}: セクション「{heading}」の本文が空です。")
 
 
+_MAX_GENERATION_ATTEMPTS = 3
+
+
+def _generate_one_report(client: LLMClient, spec: ReportSpec) -> str:
+    """1件のレポートを生成する。
+
+    小型のローカルLLMは、指定した見出し構成を毎回厳密には守れないことがある
+    （実際に60件中1件、見出し欠落で失敗する事例が起きた）。温度付き(0.7)サンプリング
+    なので同じ入力でも生成のたびに結果が変わることを利用し、生成→検証に失敗したら
+    数回リトライしてから諦める。
+    """
+    system, user = build_prompt(spec)
+    last_error: LLMConnectionError | None = None
+    for attempt in range(1, _MAX_GENERATION_ATTEMPTS + 1):
+        try:
+            body = client.chat(system, user, temperature=0.7)
+            _validate_report_body(spec, body)
+        except LLMConnectionError as exc:
+            last_error = exc
+            print(f"{spec.report_id}: 生成/検証に失敗（{attempt}/{_MAX_GENERATION_ATTEMPTS}回目）: {exc}")
+            continue
+        title = f"# {spec.part} {spec.analysis_type} 解析レポート（{spec.report_id}）\n\n"
+        return _frontmatter(spec) + title + body.strip() + "\n"
+
+    assert last_error is not None
+    raise last_error
+
+
 def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -213,11 +241,7 @@ def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) 
     # 前回のデータセット（およびそれと対応するqa_pairs.json）を壊さないため。
     generated: dict[str, str] = {}
     for spec in specs:
-        system, user = build_prompt(spec)
-        body = client.chat(system, user, temperature=0.7)
-        _validate_report_body(spec, body)
-        title = f"# {spec.part} {spec.analysis_type} 解析レポート（{spec.report_id}）\n\n"
-        generated[spec.report_id] = _frontmatter(spec) + title + body.strip() + "\n"
+        generated[spec.report_id] = _generate_one_report(client, spec)
         print(f"generated (in-memory): {spec.report_id}")
 
     # ここまで来て初めて、前回の生成物（RPT-*.md）を一掃して書き出す。
