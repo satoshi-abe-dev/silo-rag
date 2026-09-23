@@ -28,6 +28,7 @@ import contextlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .config import CHROMA_DIR, COLLECTION_NAME, SYNTH_REPORTS_DIR, load_config
 from .llm_client import LLMClient, LLMConnectionError
@@ -282,6 +283,7 @@ def _extract_pdf(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], byt
 
     image: bytes | None = None
     for page in reader.pages:
+        page_images: Any
         try:
             page_images = page.images
         except Exception:
@@ -401,7 +403,7 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
                 embeddings = llm_client.embed([c.text for c in batch])
                 building.add(
                     ids=[c.chunk_id for c in batch],
-                    embeddings=embeddings,
+                    embeddings=embeddings,  # type: ignore[arg-type]  # list invariance vs. chromadb stub
                     documents=[c.text for c in batch],
                     metadatas=[c.metadata for c in batch],
                 )

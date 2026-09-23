@@ -116,7 +116,8 @@ def search(
         # config.retrieval.vector_weight=0.0は「BM25のみ」を意味する設定。この場合は
         # 埋め込みモデルへの依存自体を発生させないよう、ベクトル検索を呼び出さない
         # （呼ぶと埋め込みモデル未ロード時にBM25のみのモードまで失敗してしまう）。
-        vector_scores, vector_chunks = {}, {}
+        vector_scores: dict[str, float] = {}
+        vector_chunks: dict[str, Chunk] = {}
     else:
         vector_scores, vector_chunks = _vector_search(collection, client, query, top_k_candidates, where)
 
