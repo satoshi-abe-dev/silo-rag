@@ -123,13 +123,14 @@ Retrieval (C) and generation (D) don't depend on each other — both depend only
 
 ## Development process (graph engineering + independent review)
 
-The development process itself was also a design target. The requirement to "bring graph engineering into the development process" (see 🧭 above) was concretized by AI as follows:
+The development process itself was also a design target. The requirement to "bring graph engineering into the development process" (see 🧭 above) was concretized by AI as follows.
 
-- **Split implementation along DAG nodes**: the six nodes (A–F) above are each an independent unit of work. Nodes with no dependency on each other (C: retrieval, D: generation) can be **implemented in parallel, neither waiting on the other**.
-- **Parallel implementation**: independent nodes were handed to multiple Agents (subagents) running at the same time, rather than one session writing everything in sequence — the dependency graph's shape was carried straight into the development process itself.
-- **A per-node independent review gate**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node (the same model doing both implementation and review tends to share the same blind spots, so a different vendor's perspective was forced in deliberately).
-- For example, this review caught a real bug in `retrieval.py`: under this project's specific conditions (a small corpus plus a character-bigram tokenizer), `BM25Okapi`'s IDF went negative and inverted the ranking — fixed by switching to `BM25Plus`. It also caught a bug in `datagen.py`'s evaluation-QA generation, where the questioner's own department report leaked into the gold answer for cross-department questions (kept as a regression test in `tests/test_datagen.py`).
-- The domain pivot itself (structural analysis → cross-department project lessons) followed the same approach: swapping the system prompts, the test vocabulary, and the README were independent tasks, split across parallel Agents.
+What graph engineering — designing the pipeline as a DAG and making dependencies between modules explicit — offers, and where this project actually got each benefit:
+
+- **Parallel implementation**: nodes with no dependency on each other (C: retrieval, D: generation) were handed to two Agents (subagents) running at the same time.
+- **Independent testability**: every node can be tested on its own, with fakes like `_FakeVLMClient` and `_ScriptedClient` standing in for the real LLM/VLM calls — the whole test suite passes in CI with no live LLM connection at all.
+- **Bug localization**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node. It caught a real bug in `retrieval.py` (`BM25Okapi`'s IDF going negative and inverting the ranking) and a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`).
+- **Reusable module separation**: during the domain pivot (structural analysis → cross-department project lessons), swapping the system prompts, the test vocabulary, and the README were independent tasks that could be split across parallel Agents.
 
 ## License
 
