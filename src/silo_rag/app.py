@@ -99,6 +99,12 @@ def main() -> None:
         return
     question = question.strip()
 
+    # 検索・生成が終わるまでhistoryには入らない（rerun後の履歴ループで初めて表示される）ため、
+    # ここで先に質問だけ表示しておく。フォームはclear_on_submitで空になっており、
+    # 表示しないと処理中の間「何を聞いたか」が画面から消えてしまう。
+    with st.chat_message("user"):
+        st.write(question)
+
     # 会話履歴（指示語頼みのフォローアップ質問を検索・生成の両方で解決するために渡す）。
     history = [(q, a.text) for q, a, _ in st.session_state.history] or None
 
