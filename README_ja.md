@@ -110,12 +110,12 @@ graph LR
 
 | ノード | モジュール | 役割 | 使用モデル（`config.toml`の`[ai]`） |
 | --- | --- | --- | --- |
-| A | `src/silo_rag/datagen.py` | 業界・職種を問わない社内プロジェクトのダミー振り返りレポート（部署ごとにハウススタイルが微妙に異なり、Markdown/Word/Excel/PowerPoint/PDFのいずれかにランダムに書き出す。成果画像も1枚合成して埋め込む）と評価用QAペアを生成 | `llm_model`（レポート本文生成） |
-| B | `src/silo_rag/ingest.py` | 5形式それぞれの読み取りロジックで見出し単位にチャンキングし、埋め込み画像をVLMでキャプション化してから、ローカル埋め込みモデルでベクトル化しChromaDBに格納 | `embed_model`（チャンクのベクトル化）／`vlm_model`（成果画像のキャプション化） |
-| C | `src/silo_rag/retrieval.py` | BM25（キーワード）＋ベクトル類似度のハイブリッド検索 → LLMによるリランキング | `embed_model`（クエリのベクトル化）／`llm_model`（リランキング） |
-| D | `src/silo_rag/generation.py` | 検索済みチャンクを根拠に、出典（レポートID・セクション・**部署**）付きの回答を生成 | `llm_model`（回答生成） |
-| E | `src/silo_rag/eval.py` | gold-standard QAペアに対する検索精度（Recall@k, MRR）と回答品質（簡易LLM-as-judge, 引用網羅率）を測定 | C・Dが使う全モデル＋`llm_model`（LLM-as-judge採点） |
-| F | `src/silo_rag/app.py` | Streamlitチャット UI（部署・プロジェクト種別での絞り込み、引用元の展開表示） | C・Dが使う全モデル（質問のたびに呼び出す） |
+| A | `src/silo_rag/datagen.py` | - 業界・職種を問わない社内プロジェクトのダミー振り返りレポートを生成（部署ごとにハウススタイルが微妙に異なり、Markdown/Word/Excel/PowerPoint/PDFのいずれかにランダムに書き出す。成果画像も1枚合成して埋め込む）<br>- 評価用QAペアを生成 | `llm_model`（レポート本文生成） |
+| B | `src/silo_rag/ingest.py` | - 5形式それぞれの読み取りロジックで見出し単位にチャンキング<br>- 埋め込み画像をVLMでキャプション化<br>- ローカル埋め込みモデルでベクトル化しChromaDBに格納 | - `embed_model`（チャンクのベクトル化）<br>- `vlm_model`（成果画像のキャプション化） |
+| C | `src/silo_rag/retrieval.py` | - BM25（キーワード）＋ベクトル類似度のハイブリッド検索<br>- LLMによるリランキング | - `embed_model`（クエリのベクトル化）<br>- `llm_model`（リランキング） |
+| D | `src/silo_rag/generation.py` | - 検索済みチャンクを根拠に回答を生成<br>- 出典（レポートID・セクション・**部署**）を付与 | `llm_model`（回答生成） |
+| E | `src/silo_rag/eval.py` | - gold-standard QAペアに対する検索精度（Recall@k, MRR）を測定<br>- 回答品質（簡易LLM-as-judge, 引用網羅率）を測定 | - C・Dが使う全モデル<br>- `llm_model`（LLM-as-judge採点） |
+| F | `src/silo_rag/app.py` | - Streamlitチャット UI<br>- 部署・プロジェクト種別での絞り込み、引用元の展開表示 | C・Dが使う全モデル（質問のたびに呼び出す） |
 
 `vlm_model`が未ロードの場合、Bの画像キャプション化だけがスキップされる（警告ログのみ）。他のノードは影響を受けない。
 
