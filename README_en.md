@@ -1,4 +1,4 @@
-# CAE Analysis Knowledge Search Assistant
+# FEM Analysis Knowledge Search Assistant
 
 [日本語](README_ja.md) | English
 
@@ -17,7 +17,7 @@
 
 ## Background and problem
 
-In CAE departments, starting a new analysis almost always means digging up questions like "has something similar been analyzed before?" or "what were the boundary conditions, mesh settings, and issues that came up back then?" But terminology, report formats, and information sharing often aren't fully standardized across departments, so useful past cases from other departments tend to get buried.
+In structural analysis departments, starting a new analysis almost always means digging up questions like "has something similar been analyzed before?" or "what were the boundary conditions, mesh settings, and issues that came up back then?" But terminology, report formats, and information sharing often aren't fully standardized across departments, so useful past cases from other departments tend to get buried.
 
 This project demonstrates a value proposition: **as long as documents are kept in the right place, a RAG system can search and reuse them across departments even when information sharing between those departments is imperfect.**
 

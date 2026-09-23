@@ -259,7 +259,7 @@ RESULT_IMAGE_SECTION = "結果サマリー"
 def _generate_result_image(spec: ReportSpec) -> bytes:
     """解析種別に応じて、それらしい結果画像（グラフ/コンター図）をmatplotlibで合成する。
 
-    実際のCAEソルバー出力ではなく、あくまで「画像が埋め込まれたレポート」を再現する
+    実際のFEM解析ソルバー出力ではなく、あくまで「画像が埋め込まれたレポート」を再現する
     ためのダミー画像（report_idから決定的に乱数シードを作るので再現性がある）。
     """
     import io
@@ -618,7 +618,7 @@ def _write_eval_qa(qa_pairs: list[dict], out_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="CAE構造解析ダミーレポートの合成データ生成")
+    parser = argparse.ArgumentParser(description="構造解析（FEM）ダミーレポートの合成データ生成")
     parser.add_argument("--count", type=int, default=60, help="生成するレポート件数")
     parser.add_argument("--eval-count", type=int, default=15, help="生成する評価QAペア件数")
     parser.add_argument("--seed", type=int, default=42, help="乱数シード（再現性のため固定）")
