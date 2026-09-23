@@ -58,7 +58,7 @@ def _render_citations(answer: Answer, scored_chunks: list[ScoredChunk]) -> None:
 
 
 def main() -> None:
-    st.title("🔧 部署横断ナレッジ検索アシスタント")
+    st.title("🔧 部署横断ナレッジ検索")
     st.caption(
         "部署横断のプロジェクト知見・教訓を、部署間の情報共有が"
         "不十分な状況でも横断的に検索・再利用できるようにするデモです。"
