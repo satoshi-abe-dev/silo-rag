@@ -155,7 +155,39 @@ graph LR
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 
-Retrieval (C) and generation (D) don't depend on each other — both depend only on `ingest.Chunk`. The first place they're combined is `app.py` / `eval.py`.
+### What a "node" actually is
+
+A node is a unit of work with a clear input/output boundary. In this project, nodes A–F
+happen to line up one-to-one with a single file (module) each — each of the six
+responsibilities just happened to be the right size for one file. In general the granularity
+is a design choice: a node could be a single function, or a whole multi-file subsystem.
+
+Each node keeps its internals to itself. `retrieval.py`, for example, has several private
+(underscore-prefixed) helper functions like `_bm25_search` and `_vector_search`, but exposes
+only one public function, `search()` — callers (`app.py`, `eval.py`) never need to know
+whether it's using BM25, vector search, or how the reranking works. `generation.py` is the
+same: it exposes only `answer_question()` and keeps its prompt construction internal.
+
+### How nodes actually connect
+
+Each arrow in the diagram is a different kind of connection under the hood.
+
+- **A → B (datagen → ingest)**: connected through files. A writes report files to `data/synth_reports/` on disk; B just reads them. Zero Python coupling — `ingest.py` doesn't import anything from `datagen.py`.
+- **B → C/D (ingest → retrieval/generation)**: data flows through ChromaDB (a persistent database on disk). C and D don't import B's processing functions — only the `Chunk` **type definition** (`from .ingest import Chunk`). They know the shape of B's output, not how B produced it.
+- **C/D → E/F (retrieval/generation → eval/app)**: this is the only place with ordinary Python function calls. `eval.py` and `app.py` each import and call `search()` / `answer_question()` directly.
+
+The stronger the dependency, the tighter the code coupling (direct function calls for the last kind), and the weaker the dependency, the looser the coupling (files only for the first, a shared type only for the second).
+
+### Which nodes are actually independent
+
+Across this DAG's six nodes and six arrows, the only pair with **no arrow directly connecting them** is C and D (retrieval and generation). Both depend on B, but not on each other.
+
+| Pair | Dependency | Could be implemented in parallel? |
+| --- | --- | --- |
+| A-B, B-C, B-D, C-E, D-E, E-F | Yes | No — has to wait on its dependency |
+| **C-D** | **None** | **Yes — actually split across two parallel Agents** |
+
+Worth being precise about: "the DAG being acyclic (no loops)" and "two specific nodes being independent" are different claims. Being acyclic is what makes the whole graph buildable at all — a well-defined build order exists (if A depended on B and B also depended on A, there'd be no way to decide which to build first). Independence is a pairwise question — whether an arrow (a path) connects two specific nodes — and even a fully acyclic graph offers zero room for parallelism if it's just one straight chain (A→B→C→D→E→F). It's the graph's actual shape — the fact that no arrow happens to connect C and D — that produced the parallel-implementation payoff here, not acyclicity by itself.
 
 ## Development process (graph engineering + independent review)
 
@@ -167,6 +199,8 @@ What graph engineering — designing the pipeline as a DAG and making dependenci
 - **Independent testability**: every node can be tested on its own, with fakes like `_FakeVLMClient` and `_ScriptedClient` standing in for the real LLM/VLM calls — the whole test suite passes in CI with no live LLM connection at all.
 - **Bug localization**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node. It caught a real bug in `retrieval.py` (`BM25Okapi`'s IDF going negative and inverting the ranking) and a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`).
 - **Reusable module separation**: since each node is independent, rewriting or redoing just one of them later doesn't touch the others. In practice, follow-up changes like adjusting the system prompts, updating the test vocabulary, or revising the README have each been split across parallel Agents as independent tasks too.
+
+Worth being precise about: being able to decide a build order isn't a benefit unique to graph engineering — any complex system, whether built by AI or a human, needs its dependencies sorted out into some order regardless. What actually paid off in this project's context are two effects that only became *visible* once the dependencies were written out as an explicit graph (i.e., once the system was broken into nodes in the first place): discovering and parallelizing the part that didn't need an order imposed on it (C/D), and being able to review and verify each node in a narrow, isolated scope. Both matter more in an AI-collaborative setup — multiple Agents working concurrently, with a different vendor's AI verifying each result — than they would in ordinary solo development.
 
 ## License
 
