@@ -1,25 +1,23 @@
-# CAE Analysis Knowledge Search Assistant
+# FEM Analysis Knowledge Search Assistant
 
 [日本語](README_ja.md) | English
 
 **A portfolio implementation of an internal knowledge-search RAG for structural analysis (FEM) in manufacturing (automotive parts). It lets engineers search and reuse past analysis reports across departments. All processing runs on a local LLM, with nothing sent externally.**
 
-> 🧭 **The requirements and design decisions here are the author's own.** The main ones:
+> 🧭 **The requirements here are the author's own. Most of the technical implementation was proposed by AI, which the author reviewed and approved.**
 >
-> - The retrieval pipeline design: hybrid search (BM25 + vector similarity) followed by LLM reranking. Caught and fixed a real bug where `BM25Okapi`'s IDF went negative and inverted the ranking under this project's specific conditions (a small corpus plus a character-bigram tokenizer) — switched to `BM25Plus` to fix it
-> - Always attaching citations (report ID, section, **department**) to generated answers, so that "does cross-department search and reuse actually work" can be verified rather than assumed
-> - The evaluation design: scoring cross-department and same-department questions separately, so the cross-department search claim can be checked numerically rather than asserted
-> - Also captioning result images with a VLM at ingest time so they're searchable too — a multimodal ingest design
-> - The architecture choice to run everything on a local LLM with zero external transmission — a realistic constraint for manufacturing, where confidential design information is at stake
-> - The development-process design: splitting implementation along DAG nodes, implementing independent nodes in parallel, and making an independent review from a different vendor's AI (the `codex` CLI) a required gate after each node
-
-> The reasoning behind each decision is in [Development process](#development-process-graph-engineering--independent-review) below. Implementation used AI (Claude Code) as a pair-programming partner, credited via `Co-Authored-By` on commits.
+> - The theme: cross-department knowledge search for structural analysis (FEM)
+> - The requirement to mix file formats (Markdown/Word/Excel/PowerPoint/PDF), reflecting how file formats are often inconsistent in the real world
+> - The requirement to run everything on a local LLM with zero external transmission — a realistic constraint for manufacturing, where confidential design information is at stake
+> - The requirement to bring "graph engineering" into the development process. The concrete realization of that — decomposing work into DAG nodes, implementing independent nodes in parallel, and making an independent review from a different vendor's AI (the `codex` CLI) a required gate after each node — was AI's proposal
+>
+> Individual technical decisions — the hybrid retrieval pipeline design, the `BM25Okapi` → `BM25Plus` bug fix, citation-based verifiability, the eval split design — were likewise proposed by AI (Claude Code) and approved by the author after an independent review (codex). AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits.
 
 ---
 
 ## Background and problem
 
-In CAE departments, starting a new analysis almost always means digging up questions like "has something similar been analyzed before?" or "what were the boundary conditions, mesh settings, and issues that came up back then?" But terminology, report formats, and information sharing often aren't fully standardized across departments, so useful past cases from other departments tend to get buried.
+In structural analysis departments, starting a new analysis almost always means digging up questions like "has something similar been analyzed before?" or "what were the boundary conditions, mesh settings, and issues that came up back then?" But terminology, report formats, and information sharing often aren't fully standardized across departments, so useful past cases from other departments tend to get buried.
 
 This project demonstrates a value proposition: **as long as documents are kept in the right place, a RAG system can search and reuse them across departments even when information sharing between those departments is imperfect.**
 

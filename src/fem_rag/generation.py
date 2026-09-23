@@ -57,7 +57,7 @@ def _build_context_block(index: int, chunk: Chunk) -> str:
 
 def _build_prompt(question: str, chunks: list[Chunk]) -> tuple[str, str]:
     system = (
-        "あなたは自動車部品の構造解析(FEM/CAE)に関する社内ナレッジ検索アシスタントです。"
+        "あなたは自動車部品の構造解析(FEM)に関する社内ナレッジ検索アシスタントです。"
         "以下の方針を厳守してください。\n"
         "- 回答は必ず、与えられた「出典」コンテキストに書かれている内容のみに基づいて作成してください。"
         "コンテキストに書かれていない事実を推測・創作しないでください。\n"

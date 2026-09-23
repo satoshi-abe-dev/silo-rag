@@ -1,4 +1,4 @@
-# cae-rag project operating rules
+# fem-rag project operating rules
 
 These apply on top of the workspace-wide rules (`/Users/satoshi/myFolder/.claude/CLAUDE.md`).
 

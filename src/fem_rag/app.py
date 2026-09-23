@@ -20,7 +20,7 @@ from fem_rag.generation import Answer, answer_question
 from fem_rag.llm_client import LLMClient, LLMConnectionError
 from fem_rag.retrieval import ScoredChunk, search
 
-st.set_page_config(page_title="CAE解析ナレッジ検索", page_icon="🔧")
+st.set_page_config(page_title="FEM解析ナレッジ検索", page_icon="🔧")
 
 
 @st.cache_resource
@@ -58,7 +58,7 @@ def _render_citations(answer: Answer, scored_chunks: list[ScoredChunk]) -> None:
 
 
 def main() -> None:
-    st.title("🔧 CAE解析ナレッジ検索アシスタント")
+    st.title("🔧 FEM解析ナレッジ検索アシスタント")
     st.caption(
         "自動車部品の構造解析(FEM)に関する社内の過去事例を、部署間の情報共有が"
         "不十分な状況でも横断的に検索・再利用できるようにするデモです。"
