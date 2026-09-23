@@ -75,6 +75,8 @@ python -m silo_rag.eval
 streamlit run src/silo_rag/app.py
 ```
 
+`datagen`実行中に「生成に失敗しました」という警告が出ることがある（小規模なローカルLLMが指定した見出し構成を毎回厳密には守れないため）。レポート単位・バッチ全体の両方で自動的にリトライするので、そのまま待てば通常は成功する。それでも失敗する場合は、ロードしているモデルを変えるか、少し時間を置いて `python -m silo_rag.datagen` を再実行する。
+
 `python -m silo_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付きで、区分ごとにhit_rate・recall@k・MRR・citation_rate・avg_judge_scoreを集計する）。実際の数値はLM Studioにロードしたモデルとデータセットに依存する。
 
 ## 制約・スコープ
