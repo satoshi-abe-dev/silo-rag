@@ -16,33 +16,33 @@ from fem_rag.llm_client import LLMConnectionError
 
 SAMPLE_REPORT = """---
 report_id: RPT-001
-dept: ボディ設計部
-analysis_type: 静解析（線形）
-part: フロントドアパネル
-solver: Abaqus
-material: 高張力鋼板(980MPa級)
+dept: マーケティング部
+project_type: 新規事業立ち上げ
+subject: 新商品ローンチキャンペーン
+method: アジャイル（スクラム）
+resourcing: 既存メンバーのみで対応
 author: 担当者A
 date: 2023-01-01
 ---
-# フロントドアパネル 静解析（線形） 解析レポート（RPT-001）
+# 新商品ローンチキャンペーン 新規事業立ち上げ 振り返りレポート（RPT-001）
 
-## 解析目的
-衝突安全性能を確認するための静解析。
+## プロジェクト目的
+新商品の認知拡大と初動売上の確保を目的とした振り返り。
 
-## 対象部品・製品カテゴリ
-フロントドアパネル。ボディ系部品。
+## 対象領域・テーマ
+新商品ローンチキャンペーン。マーケティング部主管の施策。
 
-## メッシュ設定
-四角形シェル要素、平均寸法5mm。
+## 推進体制
+週次スクラムで進行、関係部署は都度共有会で連携。
 """
 
 
 def test_parse_frontmatter_roundtrip():
     meta, body = parse_frontmatter(SAMPLE_REPORT)
     assert meta["report_id"] == "RPT-001"
-    assert meta["dept"] == "ボディ設計部"
-    assert meta["analysis_type"] == "静解析（線形）"
-    assert body.startswith("# フロントドアパネル")
+    assert meta["dept"] == "マーケティング部"
+    assert meta["project_type"] == "新規事業立ち上げ"
+    assert body.startswith("# 新商品ローンチキャンペーン")
 
 
 def test_parse_frontmatter_missing_raises():
@@ -54,8 +54,8 @@ def test_split_into_sections_basic():
     _, body = parse_frontmatter(SAMPLE_REPORT)
     sections = split_into_sections(body)
     headings = [h for h, _ in sections]
-    assert headings == ["解析目的", "対象部品・製品カテゴリ", "メッシュ設定"]
-    assert "衝突安全性能" in dict(sections)["解析目的"]
+    assert headings == ["プロジェクト目的", "対象領域・テーマ", "推進体制"]
+    assert "認知拡大" in dict(sections)["プロジェクト目的"]
 
 
 def test_split_into_sections_ignores_text_before_first_heading():
@@ -78,37 +78,37 @@ def test_build_chunks_ids_and_metadata(tmp_path):
     assert len(chunks) == 3
     ids = [c.chunk_id for c in chunks]
     assert ids == [
-        "RPT-001::解析目的",
-        "RPT-001::対象部品・製品カテゴリ",
-        "RPT-001::メッシュ設定",
+        "RPT-001::プロジェクト目的",
+        "RPT-001::対象領域・テーマ",
+        "RPT-001::推進体制",
     ]
     # 各チャンクのメタデータには、フロントマターの値 + section が乗っている
     for c in chunks:
         assert c.metadata["report_id"] == "RPT-001"
-        assert c.metadata["dept"] == "ボディ設計部"
-        assert c.metadata["section"] in {"解析目的", "対象部品・製品カテゴリ", "メッシュ設定"}
+        assert c.metadata["dept"] == "マーケティング部"
+        assert c.metadata["section"] in {"プロジェクト目的", "対象領域・テーマ", "推進体制"}
         assert c.text.startswith(f"【{c.metadata['section']}】")
 
 
 SAMPLE_REPORT_WITH_IMAGE = f"""---
 report_id: RPT-002
-dept: ボディ設計部
-analysis_type: 静解析（線形）
-part: フロントドアパネル
-solver: Abaqus
-material: 高張力鋼板(980MPa級)
+dept: マーケティング部
+project_type: 新規事業立ち上げ
+subject: 新商品ローンチキャンペーン
+method: アジャイル（スクラム）
+resourcing: 既存メンバーのみで対応
 author: 担当者A
 date: 2023-01-01
 ---
 # タイトル
 
-## 解析目的
+## プロジェクト目的
 本文。
 
 ## {RESULT_IMAGE_SECTION}
-結果の説明文。
+成果の説明文。
 
-![結果画像](RPT-002.png)
+![成果画像](RPT-002.png)
 """
 
 
@@ -137,8 +137,8 @@ def test_build_chunks_reads_sibling_image_and_strips_markdown_syntax(tmp_path):
 
     result_chunk = next(c for c in chunks if c.metadata["section"] == RESULT_IMAGE_SECTION)
     assert "[結果画像の説明]" not in result_chunk.text
-    assert "![結果画像]" not in result_chunk.text  # 画像記法は本文チャンクから取り除かれる
-    assert "結果の説明文。" in result_chunk.text
+    assert "![成果画像]" not in result_chunk.text  # 画像記法は本文チャンクから取り除かれる
+    assert "成果の説明文。" in result_chunk.text
 
 
 def test_build_chunks_merges_vlm_caption_into_result_section(tmp_path):
@@ -146,12 +146,12 @@ def test_build_chunks_merges_vlm_caption_into_result_section(tmp_path):
     report_path.write_text(SAMPLE_REPORT_WITH_IMAGE, encoding="utf-8")
     (tmp_path / "RPT-002.png").write_bytes(b"fake-png-bytes")
 
-    client = _FakeVLMClient(caption="応力が端部に集中している。")
+    client = _FakeVLMClient(caption="施策後にKPIが向上している。")
     chunks = build_chunks(report_path, client)
 
     result_chunk = next(c for c in chunks if c.metadata["section"] == RESULT_IMAGE_SECTION)
     assert client.calls == 1
-    assert "[結果画像の説明] 応力が端部に集中している。" in result_chunk.text
+    assert "[結果画像の説明] 施策後にKPIが向上している。" in result_chunk.text
 
 
 def test_build_chunks_skips_captioning_when_no_image_present(tmp_path):
@@ -170,10 +170,10 @@ def test_caption_image_returns_none_on_llm_connection_error():
 
 
 def test_parse_pdf_text_basic():
-    text = "report_id: RPT-041\ndept: パワートレイン設計部\n\n## 解析目的\n本文A\n\n## 結果サマリー\n本文B\n"
+    text = "report_id: RPT-041\ndept: 経営企画部\n\n## プロジェクト目的\n本文A\n\n## 成果サマリー\n本文B\n"
     meta, sections = _parse_pdf_text(text)
-    assert meta == {"report_id": "RPT-041", "dept": "パワートレイン設計部"}
-    assert sections == [("解析目的", "本文A"), ("結果サマリー", "本文B")]
+    assert meta == {"report_id": "RPT-041", "dept": "経営企画部"}
+    assert sections == [("プロジェクト目的", "本文A"), ("成果サマリー", "本文B")]
 
 
 def test_parse_pdf_text_does_not_depend_on_blank_line_separator():
@@ -181,15 +181,15 @@ def test_parse_pdf_text_does_not_depend_on_blank_line_separator():
     呼ばなかった空行がテキストに残らず、メタデータとセクションの区切りの空行が
     消えることがある（60件中9件のPDFでゼロセクションになる実例が見つかった）。
     空行の有無に依存しない実装になっていることを確認する。"""
-    text = "report_id: RPT-041\ndept: パワートレイン設計部\n## 解析目的\n本文A\n## 結果サマリー\n本文B\n"
+    text = "report_id: RPT-041\ndept: 経営企画部\n## プロジェクト目的\n本文A\n## 成果サマリー\n本文B\n"
     meta, sections = _parse_pdf_text(text)
-    assert meta == {"report_id": "RPT-041", "dept": "パワートレイン設計部"}
-    assert sections == [("解析目的", "本文A"), ("結果サマリー", "本文B")]
+    assert meta == {"report_id": "RPT-041", "dept": "経営企画部"}
+    assert sections == [("プロジェクト目的", "本文A"), ("成果サマリー", "本文B")]
 
 
 def test_parse_pdf_text_empty_metadata_line_is_harmless():
     # メタデータ部分に複数の空行が挟まっても問題なく無視される。
-    text = "report_id: RPT-001\n\n\ndept: ボディ設計部\n## 解析目的\n本文\n"
+    text = "report_id: RPT-001\n\n\ndept: マーケティング部\n## プロジェクト目的\n本文\n"
     meta, sections = _parse_pdf_text(text)
-    assert meta == {"report_id": "RPT-001", "dept": "ボディ設計部"}
-    assert sections == [("解析目的", "本文")]
+    assert meta == {"report_id": "RPT-001", "dept": "マーケティング部"}
+    assert sections == [("プロジェクト目的", "本文")]

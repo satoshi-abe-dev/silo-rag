@@ -15,12 +15,12 @@ from __future__ import annotations
 import streamlit as st
 
 from fem_rag.config import load_config
-from fem_rag.datagen import ANALYSIS_TYPES, DEPARTMENTS
+from fem_rag.datagen import DEPARTMENTS, PROJECT_TYPES
 from fem_rag.generation import Answer, answer_question
 from fem_rag.llm_client import LLMClient, LLMConnectionError
 from fem_rag.retrieval import ScoredChunk, search
 
-st.set_page_config(page_title="FEM解析ナレッジ検索", page_icon="🔧")
+st.set_page_config(page_title="部署横断ナレッジ検索", page_icon="🔧")
 
 
 @st.cache_resource
@@ -33,13 +33,13 @@ def _filter_widgets() -> dict[str, str]:
     """サイドバーの絞り込みUI。未選択のキーはfiltersに含めない（＝全件対象）。"""
     st.sidebar.header("絞り込み（任意）")
     dept = st.sidebar.selectbox("作成部署", ["(指定なし・全部署横断)", *sorted(DEPARTMENTS.keys())])
-    analysis_type = st.sidebar.selectbox("解析種別", ["(指定なし)", *ANALYSIS_TYPES])
+    project_type = st.sidebar.selectbox("プロジェクト種別", ["(指定なし)", *PROJECT_TYPES])
 
     filters: dict[str, str] = {}
     if dept != "(指定なし・全部署横断)":
         filters["dept"] = dept
-    if analysis_type != "(指定なし)":
-        filters["analysis_type"] = analysis_type
+    if project_type != "(指定なし)":
+        filters["project_type"] = project_type
     return filters
 
 
@@ -58,9 +58,9 @@ def _render_citations(answer: Answer, scored_chunks: list[ScoredChunk]) -> None:
 
 
 def main() -> None:
-    st.title("🔧 FEM解析ナレッジ検索アシスタント")
+    st.title("🔧 部署横断ナレッジ検索アシスタント")
     st.caption(
-        "自動車部品の構造解析(FEM)に関する社内の過去事例を、部署間の情報共有が"
+        "部署横断のプロジェクト知見・教訓を、部署間の情報共有が"
         "不十分な状況でも横断的に検索・再利用できるようにするデモです。"
     )
 
@@ -90,7 +90,7 @@ def main() -> None:
     # すれば、Enterは改行にしかならず変換確定と送信を安全に分離できる。
     with st.form("question_form", clear_on_submit=True):
         question = st.text_area(
-            "質問を入力してください（例: アルミ製ブラケットの固有値解析で共振を避けたい）",
+            "質問を入力してください（例: 新商品ローンチキャンペーンで、他部署の失敗事例を知りたい）",
             height=80,
         )
         submitted = st.form_submit_button("送信")

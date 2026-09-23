@@ -88,7 +88,7 @@ class LLMClient:
         finish_reason = choice.get("finish_reason")
         if finish_reason == "length":
             # max_tokensを使い切って途中で打ち切られた応答。合成データ生成では
-            # 「トラブルシューティング・教訓」など末尾セクションが欠落したまま
+            # 「教訓・つまずいたポイント」など末尾セクションが欠落したまま
             # 保存されてしまうため、黙って受理せず呼び出し側にエラーとして伝える。
             raise LLMConnectionError(
                 f"応答がmax_tokens（{len(content)}文字生成した時点）で打ち切られました。"

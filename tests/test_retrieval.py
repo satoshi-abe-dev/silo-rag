@@ -24,8 +24,8 @@ def test_tokenize_japanese_uses_bigrams():
 
 
 def test_tokenize_mixed_ascii_and_japanese():
-    # ASCII語（Abaqus）はそのまま1トークン、続く日本語部分（で解析）はbigram化される。
-    assert tokenize("Abaqusで解析") == ["abaqus", "で解", "解析"]
+    # ASCII語（KPI）はそのまま1トークン、続く日本語部分（で確認）はbigram化される。
+    assert tokenize("KPIで確認") == ["kpi", "で確", "確認"]
 
 
 def test_tokenize_whitespace_is_separator_not_token():
@@ -70,15 +70,15 @@ def test_build_where_none_for_no_filters():
 
 
 def test_build_where_single_key_is_plain_dict():
-    assert _build_where({"dept": "ボディ設計部"}) == {"dept": "ボディ設計部"}
+    assert _build_where({"dept": "マーケティング部"}) == {"dept": "マーケティング部"}
 
 
 def test_build_where_multi_key_uses_and():
-    where = _build_where({"dept": "ボディ設計部", "analysis_type": "静解析（線形）"})
+    where = _build_where({"dept": "マーケティング部", "project_type": "新規事業立ち上げ"})
     assert where == {
         "$and": [
-            {"dept": "ボディ設計部"},
-            {"analysis_type": "静解析（線形）"},
+            {"dept": "マーケティング部"},
+            {"project_type": "新規事業立ち上げ"},
         ]
     }
 
