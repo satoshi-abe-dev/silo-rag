@@ -98,8 +98,10 @@ To use your own reports, skip `datagen` and `eval` and just run `ingest` directl
 (`eval` needs the synthetic gold-standard QA pairs, so it doesn't apply to your own data):
 
 ```bash
-python -m silo_rag.ingest --reports-dir path/to/your/reports
+python -m silo_rag.ingest --reports-dir <path to the directory containing your report files>
 ```
+
+(Replace the `<...>` part with an actual path, e.g. `--reports-dir ~/Documents/reports`.)
 
 `ingest`'s parser itself is generic — any Markdown/Word/Excel/PowerPoint/PDF file split into
 a `---` frontmatter block plus `## heading` sections works, whatever field or heading names
