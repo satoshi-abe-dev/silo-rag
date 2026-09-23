@@ -35,7 +35,11 @@
 - [LM Studio](https://lmstudio.ai/) 等、OpenAI互換APIを話すローカルLLMサーバー
   - チャット用モデル・埋め込み用モデル・**画像説明用のvisionモデル（VLM）**の3種類をロードする（例: Qwen2.5-VL/Qwen3-VL系）
   - VLMが未ロードでも他の機能は動く（画像キャプション取得だけスキップされ、警告が出る）
-  - 既定では `http://localhost:1234/v1` に接続する
+  - 既定では`http://localhost:1234/v1`（LM Studioのデフォルトポート）に接続する想定
+  - Ollama等、別のOpenAI互換サーバーを使う場合は、`config.toml`の`[ai] base_url`を
+    書き換える（例: Ollamaなら`http://localhost:11434/v1`）。環境変数
+    `SILORAG_AI_BASE_URL`での上書きも可能（優先順位: 環境変数 > `config.toml` >
+    コード内デフォルト値）
 
 ### インストール
 
