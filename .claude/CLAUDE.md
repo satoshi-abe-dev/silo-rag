@@ -10,7 +10,7 @@ These apply on top of the workspace-wide rules (`/Users/satoshi/myFolder/.claude
 ## Branching
 
 - No direct commits or pushes to `main`. Work happens on a branch, opened as a PR via `gh pr create`.
-- Merge a PR only after the user has explicitly approved it (and the checklist below is satisfied).
+- Standing authorization: merge a PR (`gh pr merge`) without asking each time, as long as every item in the pre-merge checklist below is satisfied. If any item is unmet or in doubt, stop and ask instead of merging.
 
 ## Commit / PR language
 
@@ -23,9 +23,11 @@ Before merging a PR into `main`, confirm:
 
 - `.gitignore` correctly excludes `config.toml` / `data/chroma_db/` etc.
 - The diff stays within the intended scope (nothing beyond the corresponding issue/request has crept in).
-- Tests pass (`pytest`).
+- CI is green (`gh pr checks`) — this covers ruff, mypy, and pytest.
 - No destructive operations (force push, history rewrite, etc.) are included.
 - An independent review (e.g. the `codex` CLI, a different vendor's AI) has been run, with any findings fixed and re-reviewed.
+
+If any of these don't hold, don't merge — report the specific gap to the user instead.
 
 ## Changing config/permission files
 
