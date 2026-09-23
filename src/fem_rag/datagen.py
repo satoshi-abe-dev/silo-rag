@@ -1,6 +1,7 @@
 """合成データ生成（DAGノードA）。
 
-自動車部品の構造解析（FEM）に関する、社内ナレッジ検索RAGのデモ用ダミーレポートを生成する。
+業界・職種を問わない、部署横断のプロジェクト知見・教訓に関する、社内ナレッジ検索RAGの
+デモ用ダミーレポートを生成する。
 
 前提（プラン参照）:
     - 実在・架空を問わず企業名は一切出さない。「ある1社内の複数部署」という匿名設定。
@@ -8,7 +9,7 @@
       見出し語彙（ハウススタイル）を微妙に変える。
     - ファイル形式（Markdown/Word/Excel/PowerPoint/PDF）はレポートごとにランダムに
       割り当てる（部署には固定しない。現場でファイル形式が混在している状況の再現）。
-    - 対象は構造解析（FEM）のみ。熱解析・CFD等は対象外。
+    - 対象は業種・職種を問わない一般的な社内プロジェクトの振り返り・教訓。
 
 生成はローカルLLM（LM Studio等、OpenAI互換API）経由。`python -m fem_rag.datagen` で実行する。
 """
@@ -27,46 +28,46 @@ from .llm_client import LLMClient, LLMConnectionError
 
 # --- ドメイン語彙 -----------------------------------------------------------
 
-ANALYSIS_TYPES = [
-    "静解析（線形）",
-    "固有値・モーダル解析",
-    "非線形静解析（大変形・接触）",
-    "疲労解析",
-    "振動解析（強制応答）",
+PROJECT_TYPES = [
+    "新規事業立ち上げ",
+    "業務プロセス改善",
+    "新システム導入",
+    "マーケティング施策",
+    "組織改編・体制変更",
 ]
 
-SOLVERS = ["Abaqus", "Ansys", "Nastran"]
+METHODS = ["アジャイル（スクラム）", "ウォーターフォール", "OKR運用"]
 
 DEPARTMENTS: dict[str, list[str]] = {
-    "ボディ設計部": [
-        "フロントドアパネル", "リアフェンダー", "ルーフパネル",
-        "フロントバンパービーム", "ボンネット(フード)",
+    "マーケティング部": [
+        "新商品ローンチキャンペーン", "ブランドリニューアル", "SNS運用強化",
+        "展示会出展", "顧客アンケート改善",
     ],
-    "シャシー設計部": [
-        "フロントサブフレーム", "リアクロスメンバー", "トーコントロールアーム",
-        "スタビライザーリンク", "エンジンマウントブラケット",
+    "営業推進部": [
+        "新規開拓施策", "既存顧客深耕プログラム", "代理店連携強化",
+        "価格改定対応", "商談プロセス標準化",
     ],
-    "パワートレイン設計部": [
-        "トランスミッションマウント", "排気系サポートブラケット", "オイルパン",
-        "インタークーラーステー", "プロペラシャフトサポート",
+    "商品開発部": [
+        "新商品企画", "既存商品リニューアル", "試作評価プロセス改善",
+        "サプライヤー切り替え", "コスト削減プロジェクト",
     ],
-    "ブレーキ・サスペンション設計部": [
-        "ブレーキキャリパーブラケット", "サスペンションロアアーム", "コイルスプリングシート",
-        "ダンパーマウント", "ナックル",
+    "カスタマーサポート部": [
+        "問い合わせ対応フロー刷新", "FAQサイト刷新", "サポート体制見直し",
+        "クレーム対応プロセス改善", "顧客満足度調査",
     ],
-    "品質保証部": [
-        "フロントドアパネル", "リアクロスメンバー", "ブレーキキャリパーブラケット",
-        "トランスミッションマウント", "コイルスプリングシート",
+    "経営企画部": [
+        "中期計画策定", "新拠点立ち上げ", "組織統合プロセス",
+        "予算策定プロセス見直し", "組織改編",
     ],
 }
 
 # 部署ごとのハウススタイル（見出し語彙の揺れ）。部署間で用語が統一されていない状況を再現する。
 DEPT_TERMINOLOGY: dict[str, dict[str, str]] = {
-    "ボディ設計部": {"conditions": "解析条件", "mesh": "メッシュ設定"},
-    "シャシー設計部": {"conditions": "荷重・拘束条件", "mesh": "メッシュ諸元"},
-    "パワートレイン設計部": {"conditions": "境界条件", "mesh": "要素分割"},
-    "ブレーキ・サスペンション設計部": {"conditions": "拘束・荷重条件", "mesh": "メッシュ条件"},
-    "品質保証部": {"conditions": "入力条件", "mesh": "メッシュ仕様"},
+    "マーケティング部": {"background": "実施条件", "approach": "推進体制"},
+    "営業推進部": {"background": "前提条件", "approach": "実行体制"},
+    "商品開発部": {"background": "制約条件", "approach": "進め方"},
+    "カスタマーサポート部": {"background": "実行条件", "approach": "対応フロー"},
+    "経営企画部": {"background": "与件", "approach": "実行計画"},
 }
 
 # ファイル形式は部署に固定せず、レポートごとにランダムに割り当てる（どの部署でも
@@ -74,24 +75,24 @@ DEPT_TERMINOLOGY: dict[str, dict[str, str]] = {
 FILE_FORMATS = ["md", "docx", "xlsx", "pdf", "pptx"]
 
 # メタデータの固定フィールド順。Word/Excel/PowerPoint/PDFの書き出しで共通して使う。
-METADATA_FIELDS = ["report_id", "dept", "analysis_type", "part", "solver", "material", "author", "date"]
+METADATA_FIELDS = ["report_id", "dept", "project_type", "subject", "method", "resourcing", "author", "date"]
 
-FAILURE_MODES = [
-    "メッシュが粗く、応力集中部を捉えられていなかった",
-    "収束計算が発散し、時間刻みを細分化して収束させた",
-    "材料の弾塑性物性値の入力単位を誤り、結果が過大評価された",
-    "拘束条件が実機と乖離しており、剛体モードが残ってしまった",
-    "接触条件の摩擦係数設定が不適切で、応力分布が不自然になった",
-    "要素タイプ（1次/2次要素）の選定が不適切で、曲げ剛性を過小評価した",
-    "荷重ケースの組み合わせに漏れがあり、再解析が必要になった",
-    "疲労評価のS-N線図の適用範囲を誤り、寿命予測が過大だった",
-    "共振点が想定荷重周波数と近接しており、追加補強が必要だった",
-    "解析結果と実機評価（試作品での振動試験）に乖離があり、境界条件を見直した",
+LESSONS = [
+    "関係部署への事前説明が不十分で、後工程で手戻りが発生した",
+    "進捗の可視化が不十分で、問題の発覚が遅れた",
+    "現場の意見を十分に吸い上げないまま計画を進め、実行段階で抵抗にあった",
+    "KPIの設定が曖昧で、成果の評価基準が途中でぶれた",
+    "外部ベンダーとの役割分担が不明確で、責任の所在が曖昧になった",
+    "過去の類似施策の教訓を参照せず、同じ失敗を繰り返した",
+    "意思決定のスピードが遅く、市場機会を逃した",
+    "担当者の異動により、ノウハウが引き継がれず停滞した",
+    "予算超過に気づくのが遅れ、途中でスコープを縮小せざるを得なかった",
+    "成功体験を横展開する仕組みがなく、他部署では再現されなかった",
 ]
 
-MATERIALS = [
-    "高張力鋼板(980MPa級)", "アルミニウム合金(A6061)", "冷間圧延鋼板(SPCC)",
-    "アルミダイカスト(ADC12)", "炭素繊維強化樹脂(CFRP)",
+RESOURCING = [
+    "既存メンバーのみで対応", "外部コンサルティング活用", "他部署からの兼任メンバーで構成",
+    "新規採用メンバー中心", "外部ベンダー・委託中心",
 ]
 
 AUTHOR_NAMES = [f"担当者{c}" for c in "ABCDEFGHIJ"]
@@ -101,37 +102,37 @@ AUTHOR_NAMES = [f"担当者{c}" for c in "ABCDEFGHIJ"]
 class ReportSpec:
     report_id: str
     dept: str
-    analysis_type: str
-    part: str
-    solver: str
-    material: str
-    failure_mode: str
+    project_type: str
+    subject: str
+    method: str
+    resourcing: str
+    lesson: str
     author: str
     report_date: date
     file_format: str
 
 
 def generate_report_specs(count: int, *, seed: int | None = None) -> list[ReportSpec]:
-    """部署・解析種別を横断的にカバーするようレポート仕様を生成する（層化サンプリング）。"""
+    """部署・プロジェクト種別を横断的にカバーするようレポート仕様を生成する（層化サンプリング）。"""
     rng = random.Random(seed)
     depts = list(DEPARTMENTS.keys())
-    combos = [(d, a) for d in depts for a in ANALYSIS_TYPES]
+    combos = [(d, a) for d in depts for a in PROJECT_TYPES]
     rng.shuffle(combos)
 
     specs: list[ReportSpec] = []
     base_date = date(2023, 1, 1)
     for i in range(count):
-        dept, analysis_type = combos[i % len(combos)]
-        part = rng.choice(DEPARTMENTS[dept])
+        dept, project_type = combos[i % len(combos)]
+        subject = rng.choice(DEPARTMENTS[dept])
         specs.append(
             ReportSpec(
                 report_id=f"RPT-{i + 1:03d}",
                 dept=dept,
-                analysis_type=analysis_type,
-                part=part,
-                solver=rng.choice(SOLVERS),
-                material=rng.choice(MATERIALS),
-                failure_mode=rng.choice(FAILURE_MODES),
+                project_type=project_type,
+                subject=subject,
+                method=rng.choice(METHODS),
+                resourcing=rng.choice(RESOURCING),
+                lesson=rng.choice(LESSONS),
                 author=rng.choice(AUTHOR_NAMES),
                 report_date=base_date + timedelta(days=rng.randint(0, 900)),
                 file_format=rng.choice(FILE_FORMATS),
@@ -143,35 +144,35 @@ def generate_report_specs(count: int, *, seed: int | None = None) -> list[Report
 def build_prompt(spec: ReportSpec) -> tuple[str, str]:
     term = DEPT_TERMINOLOGY[spec.dept]
     system = (
-        "あなたは自動車部品メーカーの構造解析(FEM)エンジニアです。"
+        "あなたは事業会社の企画・推進担当者です。"
         "実在・架空を問わず企業名や具体的なブランド名は一切書かないでください。"
-        "社内向けの解析レポートをMarkdown形式で日本語で書いてください。"
-        "数値は具体的な架空の値を使ってよいですが、実在製品の公表値を模倣しないでください。"
+        "社内向けのプロジェクト振り返りレポートをMarkdown形式で日本語で書いてください。"
+        "数値は具体的な架空の値を使ってよいですが、実在企業の公表値を模倣しないでください。"
     )
-    user = f"""以下の条件で、社内の構造解析レポート本文をMarkdown形式で書いてください。
+    user = f"""以下の条件で、社内のプロジェクト振り返りレポート本文をMarkdown形式で書いてください。
 
 - 作成部署: {spec.dept}
-- 対象部品: {spec.part}
-- 解析種別: {spec.analysis_type}
-- 使用ソルバー: {spec.solver}
-- 主要材料: {spec.material}
+- 対象テーマ: {spec.subject}
+- プロジェクト種別: {spec.project_type}
+- 採用手法: {spec.method}
+- 主要リソース: {spec.resourcing}
 - 担当者: {spec.author}
 - 日付: {spec.report_date.isoformat()}
-- 今回の解析で実際に起きたトラブル・教訓: {spec.failure_mode}
+- 今回のプロジェクトで実際に起きた教訓・つまずいたポイント: {spec.lesson}
 
 以下の見出し構成に厳密に従ってください（各見出しは `## ` で始める）:
 
-## 解析目的
-## 対象部品・製品カテゴリ
-## {term["conditions"]}
-## {term["mesh"]}
-## 材料物性
-## 使用ソルバー
-## 結果サマリー
-## トラブルシューティング・教訓
+## プロジェクト目的
+## 対象領域・テーマ
+## {term["background"]}
+## {term["approach"]}
+## 主要リソース
+## 採用手法
+## 成果サマリー
+## 教訓・つまずいたポイント
 
-「トラブルシューティング・教訓」セクションには、
-上記の「実際に起きたトラブル・教訓」を具体的な数値・状況付きで詳しく書いてください。
+「教訓・つまずいたポイント」セクションには、
+上記の「実際に起きた教訓・つまずいたポイント」を具体的な数値・状況付きで詳しく書いてください。
 各セクションは3〜6行程度の具体的な記述にしてください。
 タイトル行（# で始まる見出し）は書かず、上記の `## ` 見出しから書き始めてください。"""
     return system, user
@@ -181,10 +182,10 @@ def _metadata_dict(spec: ReportSpec) -> dict[str, str]:
     return {
         "report_id": spec.report_id,
         "dept": spec.dept,
-        "analysis_type": spec.analysis_type,
-        "part": spec.part,
-        "solver": spec.solver,
-        "material": spec.material,
+        "project_type": spec.project_type,
+        "subject": spec.subject,
+        "method": spec.method,
+        "resourcing": spec.resourcing,
         "author": spec.author,
         "date": spec.report_date.isoformat(),
     }
@@ -218,14 +219,14 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
     """
     term = DEPT_TERMINOLOGY[spec.dept]
     required = [
-        "解析目的",
-        "対象部品・製品カテゴリ",
-        term["conditions"],
-        term["mesh"],
-        "材料物性",
-        "使用ソルバー",
-        "結果サマリー",
-        "トラブルシューティング・教訓",
+        "プロジェクト目的",
+        "対象領域・テーマ",
+        term["background"],
+        term["approach"],
+        "主要リソース",
+        "採用手法",
+        "成果サマリー",
+        "教訓・つまずいたポイント",
     ]
     matches = list(_SECTION_HEADING_RE.finditer(body))
     headings = [m.group(1).strip() for m in matches]
@@ -252,14 +253,14 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
 _MAX_GENERATION_ATTEMPTS = 3
 
 # 画像を必ず添付するセクション。全部署共通の見出しなので固定できる
-# （DEPT_TERMINOLOGYで語彙が揺れるのはconditions/meshのみ）。
-RESULT_IMAGE_SECTION = "結果サマリー"
+# （DEPT_TERMINOLOGYで語彙が揺れるのはbackground/approachのみ）。
+RESULT_IMAGE_SECTION = "成果サマリー"
 
 
 def _generate_result_image(spec: ReportSpec) -> bytes:
-    """解析種別に応じて、それらしい結果画像（グラフ/コンター図）をmatplotlibで合成する。
+    """プロジェクト種別に応じて、それらしい成果グラフをmatplotlibで合成する。
 
-    実際のFEM解析ソルバー出力ではなく、あくまで「画像が埋め込まれたレポート」を再現する
+    実際の集計結果ではなく、あくまで「画像が埋め込まれたレポート」を再現する
     ためのダミー画像（report_idから決定的に乱数シードを作るので再現性がある）。
     """
     import io
@@ -273,27 +274,28 @@ def _generate_result_image(spec: ReportSpec) -> bytes:
     rng = np.random.default_rng(abs(hash(spec.report_id)) % (2**32))
     fig, ax = plt.subplots(figsize=(5, 3.5), dpi=100)
 
-    if spec.analysis_type == "振動解析（強制応答）":
-        t = np.linspace(0, 2, 200)
-        amp = np.exp(-t) * np.sin(2 * np.pi * 5 * t) + rng.normal(0, 0.03, t.shape)
-        ax.plot(t, amp)
-        ax.set_xlabel("時間 [s]")
-        ax.set_ylabel("応答振幅 [mm]")
-        ax.set_title(f"{spec.part} 応答波形")
-    elif spec.analysis_type == "疲労解析":
-        n = np.logspace(3, 7, 50)
-        s = 800 * n**-0.12 + rng.normal(0, 5, n.shape)
-        ax.loglog(n, s)
-        ax.set_xlabel("繰り返し数 N")
-        ax.set_ylabel("応力振幅 [MPa]")
-        ax.set_title(f"{spec.part} S-N線図")
+    if spec.project_type == "マーケティング施策":
+        t = np.linspace(0, 8, 40)
+        kpi = 2.0 + np.where(t > 4, (t - 4) * 0.6, 0) + rng.normal(0, 0.15, t.shape)
+        ax.plot(t, kpi)
+        ax.axvline(4, linestyle="--", color="gray")
+        ax.set_xlabel("週")
+        ax.set_ylabel("コンバージョン率 [%]")
+        ax.set_title(f"{spec.subject} KPI推移")
+    elif spec.project_type == "新システム導入":
+        t = np.linspace(0, 12, 40)
+        adoption = 100 / (1 + np.exp(-(t - 6))) + rng.normal(0, 2, t.shape)
+        ax.plot(t, adoption)
+        ax.set_xlabel("月")
+        ax.set_ylabel("利用率 [%]")
+        ax.set_title(f"{spec.subject} 利用率推移")
     else:
-        data = rng.normal(0, 1, (30, 30))
-        im = ax.imshow(data, cmap="jet")
-        fig.colorbar(im, ax=ax, label="相当応力 [MPa]")
-        ax.set_title(f"{spec.part} 応力分布")
-        ax.set_xticks([])
-        ax.set_yticks([])
+        labels = ["施策前", "施策後"]
+        before = rng.uniform(50, 80)
+        after = before + rng.uniform(5, 25)
+        ax.bar(labels, [before, after], color=["#888888", "#4c72b0"])
+        ax.set_ylabel("主要KPI")
+        ax.set_title(f"{spec.subject} 成果比較")
 
     fig.tight_layout()
     buf = io.BytesIO()
@@ -305,7 +307,7 @@ def _generate_result_image(spec: ReportSpec) -> bytes:
 def _generate_one_report(
     client: LLMClient, spec: ReportSpec
 ) -> tuple[dict[str, str], list[tuple[str, str]], bytes]:
-    """1件のレポートを生成し、(メタデータ, [(見出し, 本文), ...], 結果画像PNGバイト列) を返す。
+    """1件のレポートを生成し、(メタデータ, [(見出し, 本文), ...], 成果画像PNGバイト列) を返す。
 
     小型のローカルLLMは、指定した見出し構成を毎回厳密には守れないことがある
     （実際に60件中1件、見出し欠落で失敗する事例が起きた）。温度付き(0.7)サンプリング
@@ -336,7 +338,7 @@ def _generate_one_report(
 
 
 def _report_title(metadata: dict[str, str]) -> str:
-    return f"{metadata['part']} {metadata['analysis_type']} 解析レポート（{metadata['report_id']}）"
+    return f"{metadata['subject']} {metadata['project_type']} 振り返りレポート（{metadata['report_id']}）"
 
 
 def _write_markdown(
@@ -351,7 +353,7 @@ def _write_markdown(
     parts = []
     for heading, text in sections:
         if heading == RESULT_IMAGE_SECTION:
-            text = f"{text}\n\n![結果画像]({image_path.name})"
+            text = f"{text}\n\n![成果画像]({image_path.name})"
         parts.append(f"## {heading}\n{text}")
     body = "\n\n".join(parts) + "\n"
     path.write_text(header + title + body, encoding="utf-8")
@@ -487,7 +489,7 @@ def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], image:
         c.drawImage(image_reader, left_margin, y - img_height, width=img_width, height=img_height)
         y -= img_height + line_height
 
-    # 「## 結果サマリー」セクションの末尾（次の見出し行の直前、または全行の末尾）に画像を差し込む。
+    # 「## 成果サマリー」セクションの末尾（次の見出し行の直前、または全行の末尾）に画像を差し込む。
     in_result_section = False
     for line in lines:
         if line.startswith("## "):
@@ -553,43 +555,43 @@ def generate_eval_qa(specs: list[ReportSpec], count: int, *, seed: int | None = 
     rng = random.Random(seed)
     chosen = rng.sample(specs, k=min(count, len(specs)))
 
-    # 設問文には部品名と解析種別しか出てこないため、同じ(部品, 解析種別)の組み合わせを
+    # 設問文にはテーマ名とプロジェクト種別しか出てこないため、同じ(テーマ,種別)の組み合わせを
     # 持つレポートが複数あると、正解が1件だけだと決め打ちできない（どれも妥当な参照先）。
     # そのため正解は「同じ組み合わせを持つ全レポートの一覧（各々のdept/evidence付き）」
     # として持たせる（1件のdept/evidenceで代表させると、他の正解と矛盾する）。
     reports_by_key: dict[tuple[str, str], list[str]] = {}
     spec_by_report_id: dict[str, ReportSpec] = {}
     for s in specs:
-        reports_by_key.setdefault((s.part, s.analysis_type), []).append(s.report_id)
+        reports_by_key.setdefault((s.subject, s.project_type), []).append(s.report_id)
         spec_by_report_id[s.report_id] = s
 
     qa_pairs: list[dict] = []
     for i, spec in enumerate(chosen):
         cross_dept = i % 3 == 0  # 3件に1件は部署をまたいだ想定の設問にする
-        matching_ids = reports_by_key[(spec.part, spec.analysis_type)]
+        matching_ids = reports_by_key[(spec.subject, spec.project_type)]
         if cross_dept:
             other_depts = [d for d in DEPARTMENTS if d != spec.dept]
             asking_dept = rng.choice(other_depts)
             question = (
-                f"{asking_dept}です。{spec.part}に似た部品で{spec.analysis_type}を検討しています。"
-                f"他部署で参考になりそうな過去の{spec.analysis_type}の事例はありますか？"
+                f"{asking_dept}です。{spec.subject}に似たテーマで{spec.project_type}を検討しています。"
+                f"他部署で参考になりそうな過去の{spec.project_type}の事例はありますか？"
                 "特に気をつけるべき落とし穴があれば教えてください。"
             )
             # 「他部署の事例」を明示的に求めている設問なので、質問者自身の部署の
-            # レポートは正解から除く（同一(部品,解析種別)でも自部署のものは対象外）。
+            # レポートは正解から除く（同一(テーマ,種別)でも自部署のものは対象外）。
             gold_ids = [r for r in matching_ids if spec_by_report_id[r].dept != asking_dept]
         else:
             asking_dept = spec.dept
             question = (
-                f"{spec.part}の{spec.analysis_type}で、過去に参考になる社内事例はありますか？"
-                "解析条件や注意点も教えてください。"
+                f"{spec.subject}の{spec.project_type}で、過去に参考になる社内事例はありますか？"
+                "実施条件や注意点も教えてください。"
             )
             gold_ids = matching_ids
         gold_references = [
             {
                 "report_id": rid,
                 "dept": spec_by_report_id[rid].dept,
-                "evidence": spec_by_report_id[rid].failure_mode,
+                "evidence": spec_by_report_id[rid].lesson,
             }
             for rid in sorted(gold_ids)
         ]
@@ -618,7 +620,9 @@ def _write_eval_qa(qa_pairs: list[dict], out_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="構造解析（FEM）ダミーレポートの合成データ生成")
+    parser = argparse.ArgumentParser(
+        description="部署横断プロジェクト知見・教訓のダミーレポート合成データ生成"
+    )
     parser.add_argument("--count", type=int, default=60, help="生成するレポート件数")
     parser.add_argument("--eval-count", type=int, default=15, help="生成する評価QAペア件数")
     parser.add_argument("--seed", type=int, default=42, help="乱数シード（再現性のため固定）")

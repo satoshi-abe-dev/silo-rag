@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 
 from fem_rag.datagen import (
-    ANALYSIS_TYPES,
     DEPARTMENTS,
     DEPT_TERMINOLOGY,
     FILE_FORMATS,
     METADATA_FIELDS,
+    PROJECT_TYPES,
     RESULT_IMAGE_SECTION,
     ReportSpec,
     _generate_one_report,
@@ -28,20 +28,22 @@ def test_generate_report_specs_deterministic_with_seed():
     a = generate_report_specs(30, seed=1)
     b = generate_report_specs(30, seed=1)
     assert [s.report_id for s in a] == [s.report_id for s in b]
-    assert [(s.dept, s.analysis_type, s.part) for s in a] == [(s.dept, s.analysis_type, s.part) for s in b]
+    assert [(s.dept, s.project_type, s.subject) for s in a] == [
+        (s.dept, s.project_type, s.subject) for s in b
+    ]
 
 
-def test_generate_report_specs_covers_all_dept_analysis_combos():
-    n_combos = len(DEPARTMENTS) * len(ANALYSIS_TYPES)
+def test_generate_report_specs_covers_all_dept_project_type_combos():
+    n_combos = len(DEPARTMENTS) * len(PROJECT_TYPES)
     specs = generate_report_specs(n_combos, seed=7)
-    seen = {(s.dept, s.analysis_type) for s in specs}
+    seen = {(s.dept, s.project_type) for s in specs}
     assert len(seen) == n_combos
 
 
-def test_generate_report_specs_parts_belong_to_their_department():
+def test_generate_report_specs_subjects_belong_to_their_department():
     specs = generate_report_specs(50, seed=3)
     for s in specs:
-        assert s.part in DEPARTMENTS[s.dept]
+        assert s.subject in DEPARTMENTS[s.dept]
 
 
 def _make_spec(**overrides) -> ReportSpec:
@@ -49,12 +51,12 @@ def _make_spec(**overrides) -> ReportSpec:
 
     base = {
         "report_id": "RPT-001",
-        "dept": "ボディ設計部",
-        "analysis_type": "静解析（線形）",
-        "part": "フロントドアパネル",
-        "solver": "Abaqus",
-        "material": "高張力鋼板(980MPa級)",
-        "failure_mode": "メッシュが粗く、応力集中部を捉えられていなかった",
+        "dept": "マーケティング部",
+        "project_type": "新規事業立ち上げ",
+        "subject": "新商品ローンチキャンペーン",
+        "method": "アジャイル（スクラム）",
+        "resourcing": "既存メンバーのみで対応",
+        "lesson": "関係部署への事前説明が不十分で、後工程で手戻りが発生した",
         "author": "担当者A",
         "report_date": date(2023, 1, 1),
         "file_format": "md",
@@ -66,14 +68,14 @@ def _make_spec(**overrides) -> ReportSpec:
 def _required_headings(spec: ReportSpec) -> list[str]:
     term = DEPT_TERMINOLOGY[spec.dept]
     return [
-        "解析目的",
-        "対象部品・製品カテゴリ",
-        term["conditions"],
-        term["mesh"],
-        "材料物性",
-        "使用ソルバー",
-        "結果サマリー",
-        "トラブルシューティング・教訓",
+        "プロジェクト目的",
+        "対象領域・テーマ",
+        term["background"],
+        term["approach"],
+        "主要リソース",
+        "採用手法",
+        "成果サマリー",
+        "教訓・つまずいたポイント",
     ]
 
 
@@ -150,7 +152,7 @@ def test_generate_eval_qa_same_dept_question_gold_dept_matches_asking_dept():
         if qa["cross_dept"]:
             continue
         # 自部署内の設問では、asking_deptは出典レポートの部署のいずれかと一致するはず
-        # （同一(部品,解析種別)の中には他部署のレポートも混ざりうるため、asking_dept自身の
+        # （同一(テーマ,種別)の中には他部署のレポートも混ざりうるため、asking_dept自身の
         # レポートが正解集合に含まれることだけを確認する）。
         assert any(ref["dept"] == qa["asking_dept"] for ref in qa["gold_references"])
 
@@ -245,13 +247,13 @@ def test_pdf_lines_round_trips_through_ingest_parser():
 
     spec = _make_spec()
     metadata = _metadata_dict(spec)
-    sections = [("解析目的", "1行目の本文です。"), ("結果サマリー", "こちらも短い本文。")]
+    sections = [("プロジェクト目的", "1行目の本文です。"), ("成果サマリー", "こちらも短い本文。")]
 
     lines = _pdf_lines(metadata, sections)
     full_text = "\n".join(lines)
     parsed_meta, parsed_sections = _parse_pdf_text(full_text)
 
     assert parsed_meta == metadata
-    assert [h for h, _ in parsed_sections] == ["解析目的", "結果サマリー"]
+    assert [h for h, _ in parsed_sections] == ["プロジェクト目的", "成果サマリー"]
     assert parsed_sections[0][1] == "1行目の本文です。"
     assert parsed_sections[1][1] == "こちらも短い本文。"

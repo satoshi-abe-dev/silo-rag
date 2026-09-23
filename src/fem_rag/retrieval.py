@@ -85,7 +85,7 @@ def search(
     """ハイブリッド検索（BM25＋ベクトル）→ スコア統合 → LLMリランキングを行う。
 
     top_k: 最終的に返す件数。Noneならconfig.retrieval.top_k_finalを使う。
-    filters: メタデータの完全一致フィルタ（例: {"dept": "ボディ設計部"}）。複数キー指定時はAND条件。
+    filters: メタデータの完全一致フィルタ（例: {"dept": "マーケティング部"}）。複数キー指定時はAND条件。
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
@@ -280,7 +280,7 @@ def _normalize_bm25(scores: dict[str, float]) -> dict[str, float]:
 _RERANK_TEXT_TRUNCATE = 300
 
 _RERANK_SYSTEM_PROMPT = (
-    "あなたは社内向け構造解析（FEM）レポート検索システムのリランカーです。"
+    "あなたは社内向けプロジェクト知見レポート検索システムのリランカーです。"
     "与えられた質問と候補チャンクの一覧を読み、質問への関連度が高い順に候補番号を並べ替えてください。"
     "出力は候補番号のJSON配列のみとし、説明文やコードブロック記法など余計な文字列は一切含めないでください。"
     '例: [3, 1, 5]'

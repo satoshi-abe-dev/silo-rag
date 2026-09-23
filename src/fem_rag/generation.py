@@ -41,15 +41,15 @@ class Answer:
 def _build_context_block(index: int, chunk: Chunk) -> str:
     """1チャンク分をLLMへの提示用テキストに整形する。
 
-    出典を混同されないよう、report_id/部署/部品/解析種別/セクションをヘッダーとして
+    出典を混同されないよう、report_id/部署/テーマ/プロジェクト種別/セクションをヘッダーとして
     チャンク本文の前に明示し、チャンクごとに区切り線で区切る。
     """
     meta = chunk.metadata
     header = (
         f"[出典{index}] report_id={meta.get('report_id', '不明')} / "
         f"部署={meta.get('dept', '不明')} / "
-        f"部品={meta.get('part', '不明')} / "
-        f"解析種別={meta.get('analysis_type', '不明')} / "
+        f"テーマ={meta.get('subject', '不明')} / "
+        f"プロジェクト種別={meta.get('project_type', '不明')} / "
         f"セクション={meta.get('section', '不明')}"
     )
     return f"{header}\n{chunk.text}"
@@ -57,7 +57,7 @@ def _build_context_block(index: int, chunk: Chunk) -> str:
 
 def _build_prompt(question: str, chunks: list[Chunk]) -> tuple[str, str]:
     system = (
-        "あなたは自動車部品の構造解析(FEM)に関する社内ナレッジ検索アシスタントです。"
+        "あなたは部署横断のプロジェクト知見・教訓に関する社内ナレッジ検索アシスタントです。"
         "以下の方針を厳守してください。\n"
         "- 回答は必ず、与えられた「出典」コンテキストに書かれている内容のみに基づいて作成してください。"
         "コンテキストに書かれていない事実を推測・創作しないでください。\n"
@@ -66,11 +66,12 @@ def _build_prompt(question: str, chunks: list[Chunk]) -> tuple[str, str]:
         "- 回答文中で根拠にした出典は、対応するreport_idを使って"
         "「（RPT-014より）」のように本文中に引用してください。\n"
         "- 質問文に質問者自身の所属部署が明記されている場合、その部署と異なる部署の出典を"
-        "引用するときは、必ず部署名を添えて「（RPT-014, ボディ設計部の事例）」のように示し、"
+        "引用するときは、必ず部署名を添えて「（RPT-014, マーケティング部の事例）」のように示し、"
         "自部署の事例ではなく他部署の事例であることが読み手に分かるようにしてください。"
         "質問者の部署が不明な場合でも、引用ごとに出典の部署名を添えると親切です。\n"
         "- 実在・架空を問わず、企業名やブランド名は一切書かないでください。\n"
-        "- 日本語で、簡潔かつ具体的に（解析条件・トラブル・教訓など実務に役立つ点を中心に）回答してください。"
+        "- 日本語で、簡潔かつ具体的に（実施条件・つまずいたポイント・教訓など実務に役立つ点を中心に）"
+        "回答してください。"
     )
 
     context_text = "\n\n---\n\n".join(_build_context_block(i, c) for i, c in enumerate(chunks, start=1))
