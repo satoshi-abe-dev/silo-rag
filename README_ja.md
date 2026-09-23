@@ -71,7 +71,7 @@ python -m fem_rag.eval
 streamlit run src/fem_rag/app.py
 ```
 
-`python -m fem_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付き）。**現在のドメイン（部署横断プロジェクト知見）でのデータセットはまだ手元で再生成していないため、実測値の表はここでは省略している**（区分 / n / hit_rate / recall@k / MRR / citation_rate / avg_judge_score という構成で、旧ドメイン版では横断検索が数値的に機能することを確認済み。再実行後にここへ反映する）。
+`python -m fem_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付きで、区分ごとにhit_rate・recall@k・MRR・citation_rate・avg_judge_scoreを集計する）。実際の数値はLM Studioにロードしたモデルとデータセットに依存する。
 
 ## 制約・スコープ
 

@@ -71,7 +71,7 @@ python -m fem_rag.eval
 streamlit run src/fem_rag/app.py
 ```
 
-`python -m fem_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept). **The dataset hasn't been regenerated yet for the current domain (cross-department project lessons)**, so actual numbers are omitted here for now (the table format is: segment / n / hit_rate / recall@k / MRR / citation_rate / avg_judge_score — the previous domain's run already confirmed cross-department search works numerically; this will be updated after a rerun).
+`python -m fem_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, each with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The actual numbers depend on whichever models — and dataset — are loaded in LM Studio.
 
 ## Constraints and scope
 
