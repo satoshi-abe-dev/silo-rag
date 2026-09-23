@@ -125,3 +125,7 @@ The development process itself was also a design target. The requirement to "bri
 - **A per-node independent review gate**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node (the same model doing both implementation and review tends to share the same blind spots, so a different vendor's perspective was forced in deliberately).
 - For example, this review caught a real bug in `retrieval.py`: under this project's specific conditions (a small corpus plus a character-bigram tokenizer), `BM25Okapi`'s IDF went negative and inverted the ranking — fixed by switching to `BM25Plus`. It also caught a bug in `datagen.py`'s evaluation-QA generation, where the questioner's own department report leaked into the gold answer for cross-department questions (kept as a regression test in `tests/test_datagen.py`).
 - The domain pivot itself (structural analysis → cross-department project lessons) followed the same approach: swapping the system prompts, the test vocabulary, and the README were independent tasks, split across parallel Agents.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for the full text.
