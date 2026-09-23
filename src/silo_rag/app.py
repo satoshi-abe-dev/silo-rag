@@ -90,7 +90,7 @@ def main() -> None:
     # すれば、Enterは改行にしかならず変換確定と送信を安全に分離できる。
     with st.form("question_form", clear_on_submit=True):
         question = st.text_area(
-            "質問を入力してください（例: 新商品ローンチキャンペーンで、他部署の失敗事例を知りたい）",
+            "質問を入力してください（例: 新商品の販促キャンペーンで、他部署の失敗事例を知りたい）",
             height=80,
         )
         submitted = st.form_submit_button("送信")
@@ -98,9 +98,6 @@ def main() -> None:
     if not submitted or not question.strip():
         return
     question = question.strip()
-
-    with st.chat_message("user"):
-        st.write(question)
 
     with st.spinner("検索・回答生成中..."):
         try:
@@ -116,11 +113,8 @@ def main() -> None:
             st.error(str(exc))
             return
 
-    with st.chat_message("assistant"):
-        st.write(answer.text)
-        _render_citations(answer, scored)
-
     st.session_state.history.append((question, answer, scored))
+    st.rerun()
 
 
 if __name__ == "__main__":
