@@ -47,18 +47,18 @@ def test_generate_report_specs_parts_belong_to_their_department():
 def _make_spec(**overrides) -> ReportSpec:
     from datetime import date
 
-    base = dict(
-        report_id="RPT-001",
-        dept="ボディ設計部",
-        analysis_type="静解析（線形）",
-        part="フロントドアパネル",
-        solver="Abaqus",
-        material="高張力鋼板(980MPa級)",
-        failure_mode="メッシュが粗く、応力集中部を捉えられていなかった",
-        author="担当者A",
-        report_date=date(2023, 1, 1),
-        file_format="md",
-    )
+    base = {
+        "report_id": "RPT-001",
+        "dept": "ボディ設計部",
+        "analysis_type": "静解析（線形）",
+        "part": "フロントドアパネル",
+        "solver": "Abaqus",
+        "material": "高張力鋼板(980MPa級)",
+        "failure_mode": "メッシュが粗く、応力集中部を捉えられていなかった",
+        "author": "担当者A",
+        "report_date": date(2023, 1, 1),
+        "file_format": "md",
+    }
     base.update(overrides)
     return ReportSpec(**base)
 
@@ -125,7 +125,7 @@ def test_generate_eval_qa_gold_references_always_include_the_source_spec():
     assert len(qa_pairs) == 10
     for qa in qa_pairs:
         assert len(qa["gold_references"]) >= 1
-        assert "question" in qa and qa["question"]
+        assert qa.get("question")
 
 
 def test_generate_eval_qa_cross_dept_excludes_asking_department():
@@ -133,7 +133,6 @@ def test_generate_eval_qa_cross_dept_excludes_asking_department():
     誤って正解に含まれるバグがあった（codexレビューで発見・修正済み）。"""
     specs = generate_report_specs(60, seed=2)  # このseedで実際に問題が再現していた
     qa_pairs = generate_eval_qa(specs, 15, seed=2)
-    dept_by_id = {s.report_id: s.dept for s in specs}
     for qa in qa_pairs:
         if not qa["cross_dept"]:
             continue

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
+
 def _find_repo_root() -> Path:
     """リポジトリのルートを探す。
 

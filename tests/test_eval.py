@@ -8,7 +8,8 @@ from cae_rag.retrieval import ScoredChunk
 
 
 def _scored(report_id: str, score: float = 1.0) -> ScoredChunk:
-    return ScoredChunk(chunk=Chunk(chunk_id=f"{report_id}::x", text="t", metadata={"report_id": report_id}), score=score)
+    chunk = Chunk(chunk_id=f"{report_id}::x", text="t", metadata={"report_id": report_id})
+    return ScoredChunk(chunk=chunk, score=score)
 
 
 def test_dedup_report_ids_preserves_order_and_dedups():
@@ -24,7 +25,9 @@ def test_reciprocal_rank_not_found():
     assert _reciprocal_rank(["RPT-003", "RPT-004"], {"RPT-001"}) == 0.0
 
 
-def _result(qa_id: str, cross_dept: bool, hit: bool, recall: float, rr: float, cited: bool, judge) -> QAResult:
+def _result(
+    qa_id: str, cross_dept: bool, hit: bool, recall: float, rr: float, cited: bool, judge
+) -> QAResult:
     return QAResult(
         qa_id=qa_id,
         question="q",
