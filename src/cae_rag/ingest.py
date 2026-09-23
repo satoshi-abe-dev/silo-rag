@@ -24,9 +24,11 @@ PowerPointなら1枚目のスライド、PDFなら先頭のテキスト）から
 
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .config import CHROMA_DIR, COLLECTION_NAME, SYNTH_REPORTS_DIR, load_config
 from .llm_client import LLMClient, LLMConnectionError
@@ -57,7 +59,9 @@ def parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
     """先頭の `---` フロントマターを辞書として取り出し、残りの本文と一緒に返す。"""
     m = _FRONTMATTER_RE.match(raw)
     if not m:
-        raise ValueError("フロントマター（--- ... ---）が見つかりません。datagenで生成したファイルか確認してください。")
+        raise ValueError(
+            "フロントマター（--- ... ---）が見つかりません。datagenで生成したファイルか確認してください。"
+        )
     meta: dict[str, str] = {}
     for line in m.group(1).splitlines():
         if ":" not in line:
@@ -108,7 +112,9 @@ def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
 
     doc = Document(str(path))
     if not doc.tables:
-        raise ValueError(f"{path}: メタデータの表が見つかりません。datagenで生成したファイルか確認してください。")
+        raise ValueError(
+            f"{path}: メタデータの表が見つかりません。datagenで生成したファイルか確認してください。"
+        )
     meta = {row.cells[0].text.strip(): row.cells[1].text.strip() for row in doc.tables[0].rows}
 
     sections: list[tuple[str, str]] = []
@@ -137,7 +143,7 @@ def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
             if "image" in rel.reltype:
                 image = rel.target_part.blob
                 break
-    except Exception as exc:  # noqa: BLE001 - 画像取得の失敗はテキスト取り込みを止めない
+    except Exception as exc:
         print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
     return meta, sections, image
 
@@ -181,7 +187,7 @@ def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
     if embedded_images:
         try:
             image = embedded_images[0]._data()
-        except Exception as exc:  # noqa: BLE001 - 画像取得の失敗はテキスト取り込みを止めない
+        except Exception as exc:
             print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
     return meta, sections, image
 
@@ -220,7 +226,7 @@ def _extract_pptx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
                 if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                     try:
                         image = shape.image.blob
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
                     break
     return meta, sections, image
@@ -277,14 +283,15 @@ def _extract_pdf(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], byt
 
     image: bytes | None = None
     for page in reader.pages:
+        page_images: Any
         try:
             page_images = page.images
-        except Exception:  # noqa: BLE001
+        except Exception:
             page_images = []
         if page_images:
             try:
                 image = page_images[0].data
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 print(f"{path}: 画像の取得に失敗しました（無視して続行）: {exc}")
             break
     return meta, sections, image
@@ -396,7 +403,7 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
                 embeddings = llm_client.embed([c.text for c in batch])
                 building.add(
                     ids=[c.chunk_id for c in batch],
-                    embeddings=embeddings,
+                    embeddings=embeddings,  # type: ignore[arg-type]  # list invariance vs. chromadb stub
                     documents=[c.text for c in batch],
                     metadatas=[c.metadata for c in batch],
                 )
@@ -412,10 +419,8 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
 
 
 def _delete_collection_if_exists(client, name: str) -> None:
-    try:
+    with contextlib.suppress(Exception):
         client.delete_collection(name)
-    except Exception:
-        pass
 
 
 def main() -> None:

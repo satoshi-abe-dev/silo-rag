@@ -35,7 +35,9 @@ def test_build_citations_empty_for_no_chunks():
 
 
 def test_build_context_block_includes_metadata_header():
-    chunk = _chunk("RPT-014", "トラブルシューティング・教訓", "パワートレイン設計部", text="共振が問題になった。")
+    chunk = _chunk(
+        "RPT-014", "トラブルシューティング・教訓", "パワートレイン設計部", text="共振が問題になった。"
+    )
     block = _build_context_block(1, chunk)
     assert "RPT-014" in block
     assert "パワートレイン設計部" in block

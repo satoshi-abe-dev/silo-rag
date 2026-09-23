@@ -75,7 +75,7 @@ def main() -> None:
     filters = _filter_widgets()
 
     if "history" not in st.session_state:
-        st.session_state.history: list[tuple[str, Answer, list[ScoredChunk]]] = []
+        st.session_state.history = []
 
     for question, answer, scored in st.session_state.history:
         with st.chat_message("user"):

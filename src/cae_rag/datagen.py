@@ -38,11 +38,26 @@ ANALYSIS_TYPES = [
 SOLVERS = ["Abaqus", "Ansys", "Nastran"]
 
 DEPARTMENTS: dict[str, list[str]] = {
-    "ボディ設計部": ["フロントドアパネル", "リアフェンダー", "ルーフパネル", "フロントバンパービーム", "ボンネット(フード)"],
-    "シャシー設計部": ["フロントサブフレーム", "リアクロスメンバー", "トーコントロールアーム", "スタビライザーリンク", "エンジンマウントブラケット"],
-    "パワートレイン設計部": ["トランスミッションマウント", "排気系サポートブラケット", "オイルパン", "インタークーラーステー", "プロペラシャフトサポート"],
-    "ブレーキ・サスペンション設計部": ["ブレーキキャリパーブラケット", "サスペンションロアアーム", "コイルスプリングシート", "ダンパーマウント", "ナックル"],
-    "品質保証部": ["フロントドアパネル", "リアクロスメンバー", "ブレーキキャリパーブラケット", "トランスミッションマウント", "コイルスプリングシート"],
+    "ボディ設計部": [
+        "フロントドアパネル", "リアフェンダー", "ルーフパネル",
+        "フロントバンパービーム", "ボンネット(フード)",
+    ],
+    "シャシー設計部": [
+        "フロントサブフレーム", "リアクロスメンバー", "トーコントロールアーム",
+        "スタビライザーリンク", "エンジンマウントブラケット",
+    ],
+    "パワートレイン設計部": [
+        "トランスミッションマウント", "排気系サポートブラケット", "オイルパン",
+        "インタークーラーステー", "プロペラシャフトサポート",
+    ],
+    "ブレーキ・サスペンション設計部": [
+        "ブレーキキャリパーブラケット", "サスペンションロアアーム", "コイルスプリングシート",
+        "ダンパーマウント", "ナックル",
+    ],
+    "品質保証部": [
+        "フロントドアパネル", "リアクロスメンバー", "ブレーキキャリパーブラケット",
+        "トランスミッションマウント", "コイルスプリングシート",
+    ],
 }
 
 # 部署ごとのハウススタイル（見出し語彙の揺れ）。部署間で用語が統一されていない状況を再現する。
@@ -74,7 +89,10 @@ FAILURE_MODES = [
     "解析結果と実機評価（試作品での振動試験）に乖離があり、境界条件を見直した",
 ]
 
-MATERIALS = ["高張力鋼板(980MPa級)", "アルミニウム合金(A6061)", "冷間圧延鋼板(SPCC)", "アルミダイカスト(ADC12)", "炭素繊維強化樹脂(CFRP)"]
+MATERIALS = [
+    "高張力鋼板(980MPa級)", "アルミニウム合金(A6061)", "冷間圧延鋼板(SPCC)",
+    "アルミダイカスト(ADC12)", "炭素繊維強化樹脂(CFRP)",
+]
 
 AUTHOR_NAMES = [f"担当者{c}" for c in "ABCDEFGHIJ"]
 
@@ -152,8 +170,10 @@ def build_prompt(spec: ReportSpec) -> tuple[str, str]:
 ## 結果サマリー
 ## トラブルシューティング・教訓
 
-「トラブルシューティング・教訓」セクションには、上記の「実際に起きたトラブル・教訓」を具体的な数値・状況付きで詳しく書いてください。
-各セクションは3〜6行程度の具体的な記述にしてください。タイトル行（# で始まる見出し）は書かず、上記の `## ` 見出しから書き始めてください。"""
+「トラブルシューティング・教訓」セクションには、
+上記の「実際に起きたトラブル・教訓」を具体的な数値・状況付きで詳しく書いてください。
+各セクションは3〜6行程度の具体的な記述にしてください。
+タイトル行（# で始まる見出し）は書かず、上記の `## ` 見出しから書き始めてください。"""
     return system, user
 
 
@@ -319,7 +339,9 @@ def _report_title(metadata: dict[str, str]) -> str:
     return f"{metadata['part']} {metadata['analysis_type']} 解析レポート（{metadata['report_id']}）"
 
 
-def _write_markdown(metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path) -> None:
+def _write_markdown(
+    metadata: dict[str, str], sections: list[tuple[str, str]], image: bytes, path: Path
+) -> None:
     image_path = path.with_suffix(".png")
     image_path.write_bytes(image)
 
@@ -397,7 +419,9 @@ def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], image
 
     meta_slide = prs.slides.add_slide(layout)
     meta_slide.shapes.title.text = "レポートメタデータ"
-    meta_slide.placeholders[1].text_frame.text = "\n".join(f"{key}: {metadata[key]}" for key in METADATA_FIELDS)
+    meta_slide.placeholders[1].text_frame.text = "\n".join(
+        f"{key}: {metadata[key]}" for key in METADATA_FIELDS
+    )
 
     for heading, text in sections:
         slide = prs.slides.add_slide(layout)
