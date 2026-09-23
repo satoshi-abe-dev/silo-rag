@@ -155,7 +155,26 @@ graph LR
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 
-Retrieval (C) and generation (D) don't depend on each other — both depend only on `ingest.Chunk`. The first place they're combined is `app.py` / `eval.py`.
+### How nodes actually connect
+
+Each arrow in the diagram is a different kind of connection under the hood.
+
+- **A → B (datagen → ingest)**: connected through files. A writes report files to `data/synth_reports/` on disk; B just reads them. Zero Python coupling — `ingest.py` doesn't import anything from `datagen.py`.
+- **B → C/D (ingest → retrieval/generation)**: data flows through ChromaDB (a persistent database on disk). C and D don't import B's processing functions — only the `Chunk` **type definition** (`from .ingest import Chunk`). They know the shape of B's output, not how B produced it.
+- **C/D → E/F (retrieval/generation → eval/app)**: this is the only place with ordinary Python function calls. `eval.py` and `app.py` each import and call `search()` / `answer_question()` directly.
+
+The stronger the dependency, the tighter the code coupling (direct function calls for the last kind), and the weaker the dependency, the looser the coupling (files only for the first, a shared type only for the second).
+
+### Which nodes are actually independent
+
+Across this DAG's six nodes and six arrows, the only pair with **no arrow directly connecting them** is C and D (retrieval and generation). Both depend on B, but not on each other.
+
+| Pair | Dependency | Could be implemented in parallel? |
+| --- | --- | --- |
+| A-B, B-C, B-D, C-E, D-E, E-F | Yes | No — has to wait on its dependency |
+| **C-D** | **None** | **Yes — actually split across two parallel Agents** |
+
+Worth being precise about: "the DAG being acyclic (no loops)" and "two specific nodes being independent" are different claims. Being acyclic is what makes the whole graph buildable at all — a well-defined build order exists (if A depended on B and B also depended on A, there'd be no way to decide which to build first). Independence is a pairwise question — whether an arrow (a path) connects two specific nodes — and even a fully acyclic graph offers zero room for parallelism if it's just one straight chain (A→B→C→D→E→F). It's the graph's actual shape — the fact that no arrow happens to connect C and D — that produced the parallel-implementation payoff here, not acyclicity by itself.
 
 ## Development process (graph engineering + independent review)
 
