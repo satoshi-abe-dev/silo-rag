@@ -124,7 +124,7 @@ streamlit run src/silo_rag/app.py
 - Since the data is synthetic, the numbers and cases aren't drawn from real practice
 - No company names are used, real or fictional
 - Designed to be industry- and role-agnostic rather than tied to one specific domain
-- **The application itself (UI, generated data, LLM prompts) is Japanese-only.** It hasn't been localized to English — this README being bilingual is purely for portfolio readability, separate from the app's own language support. A half-translated UI (English labels next to Japanese dropdown values and answer text) was deliberately avoided
+- **The application itself (UI, generated data, LLM prompts) is Japanese-only.** This README being bilingual is purely for portfolio readability, separate from the app's own language support
 
 > 💡 **If you just want to run it, this is all you need.** From here on it's the internals of the DAG and the development process (graph engineering + independent review).
 
@@ -132,7 +132,7 @@ streamlit run src/silo_rag/app.py
 
 ## Architecture (DAG)
 
-The pipeline is designed as a DAG (directed acyclic graph) with clear dependencies between modules. Nodes with no dependency on each other (retrieval / generation) can be implemented independently.
+The pipeline is designed as a DAG (directed acyclic graph) with clear dependencies between modules.
 
 ```mermaid
 graph LR
@@ -157,37 +157,33 @@ If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is 
 
 ### What a "node" actually is
 
-A node is a unit of work with a clear input/output boundary. In this project, nodes A–F
-happen to line up one-to-one with a single file (module) each — each of the six
-responsibilities just happened to be the right size for one file. In general the granularity
-is a design choice: a node could be a single function, or a whole multi-file subsystem.
+A node is a unit of work with a clear input/output boundary. In this project, nodes A–F line
+up one-to-one with a single file each (granularity is a design choice — a node could just as
+well be a single function or a whole multi-file subsystem).
 
-Each node keeps its internals to itself. `retrieval.py`, for example, has several private
-(underscore-prefixed) helper functions like `_bm25_search` and `_vector_search`, but exposes
-only one public function, `search()` — callers (`app.py`, `eval.py`) never need to know
-whether it's using BM25, vector search, or how the reranking works. `generation.py` is the
-same: it exposes only `answer_question()` and keeps its prompt construction internal.
+Each node keeps its internals to itself. `retrieval.py` has several private helper functions
+like `_bm25_search` and `_vector_search`, but exposes only `search()` — callers never need to
+know whether it's using BM25, vector search, or how reranking works. `generation.py` exposes
+only `answer_question()`.
 
 ### How nodes actually connect
 
-Each arrow in the diagram is a different kind of connection under the hood.
+- **A → B**: connected through files (`data/synth_reports/`). Zero import coupling.
+- **B → C/D**: connected through ChromaDB. C and D import only the `Chunk` type (`from .ingest import Chunk`), not B's processing functions.
+- **C/D → E/F**: ordinary function calls — `eval.py` and `app.py` call `search()` / `answer_question()` directly.
 
-- **A → B (datagen → ingest)**: connected through files. A writes report files to `data/synth_reports/` on disk; B just reads them. Zero Python coupling — `ingest.py` doesn't import anything from `datagen.py`.
-- **B → C/D (ingest → retrieval/generation)**: data flows through ChromaDB (a persistent database on disk). C and D don't import B's processing functions — only the `Chunk` **type definition** (`from .ingest import Chunk`). They know the shape of B's output, not how B produced it.
-- **C/D → E/F (retrieval/generation → eval/app)**: this is the only place with ordinary Python function calls. `eval.py` and `app.py` each import and call `search()` / `answer_question()` directly.
-
-The stronger the dependency, the tighter the code coupling (direct function calls for the last kind), and the weaker the dependency, the looser the coupling (files only for the first, a shared type only for the second).
+The stronger the dependency, the tighter the coupling (direct calls for the last, loose coupling for the first two).
 
 ### Which nodes are actually independent
 
-Across this DAG's six nodes and six arrows, the only pair with **no arrow directly connecting them** is C and D (retrieval and generation). Both depend on B, but not on each other.
+The only independent pair is C and D (retrieval and generation) — both depend on B, not on each other.
 
 | Pair | Dependency | Could be implemented in parallel? |
 | --- | --- | --- |
 | A-B, B-C, B-D, C-E, D-E, E-F | Yes | No — has to wait on its dependency |
 | **C-D** | **None** | **Yes — actually split across two parallel Agents** |
 
-Worth being precise about: "the DAG being acyclic (no loops)" and "two specific nodes being independent" are different claims. Being acyclic is what makes the whole graph buildable at all — a well-defined build order exists (if A depended on B and B also depended on A, there'd be no way to decide which to build first). Independence is a pairwise question — whether an arrow (a path) connects two specific nodes — and even a fully acyclic graph offers zero room for parallelism if it's just one straight chain (A→B→C→D→E→F). It's the graph's actual shape — the fact that no arrow happens to connect C and D — that produced the parallel-implementation payoff here, not acyclicity by itself.
+Acyclic (no loops) just guarantees a valid build order exists at all; it's a separate claim from independence. Even a fully acyclic graph offers zero parallelism if it's one straight chain (A→B→C→D→E→F). The parallel-implementation payoff here came from the graph's actual shape — no arrow happens to connect C and D.
 
 ## Development process (graph engineering + independent review)
 
