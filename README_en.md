@@ -200,7 +200,7 @@ What graph engineering — designing the pipeline as a DAG and making dependenci
 - **Bug localization**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node. It caught a real bug in `retrieval.py` (`BM25Okapi`'s IDF going negative and inverting the ranking) and a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`).
 - **Reusable module separation**: since each node is independent, rewriting or redoing just one of them later doesn't touch the others. In practice, follow-up changes like adjusting the system prompts, updating the test vocabulary, or revising the README have each been split across parallel Agents as independent tasks too.
 
-Deciding a build order isn't a benefit unique to graph engineering. What pays off is what making the dependencies explicit as a graph reveals: the part that can be parallelized (C/D), and boundaries narrow enough to review in isolation — both worth more in an AI-collaborative setup.
+Deciding a build order isn't a benefit unique to graph engineering. What pays off is what making the dependencies explicit as a graph reveals: "the part that can be parallelized (C/D)" and "boundaries narrow enough to review in isolation."
 
 ## License
 
