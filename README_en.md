@@ -69,7 +69,7 @@ The prep work before launching the UI (generate synthetic data → ingest → ev
 bash scripts/prepare_demo_data.sh
 ```
 
-It just runs the following in order, so run them directly if you want to redo a single step
+It just runs these three in order, so run them directly if you want to redo a single step
 (see [Architecture](#architecture-dag) below for how each step is designed internally).
 
 ```bash
@@ -81,8 +81,12 @@ python -m silo_rag.ingest
 
 # Evaluate (retrieval accuracy + answer quality, combined into one report)
 python -m silo_rag.eval
+```
 
-# Launch the Streamlit UI
+Once the prep work is done, launch the UI (not included in the script — it's a foreground
+process that keeps a browser tab open, so run it yourself, separately from the prep step).
+
+```bash
 streamlit run src/silo_rag/app.py
 ```
 
