@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from fem_rag.eval import QAResult, _dedup_report_ids, _reciprocal_rank, _summarize_subset, summarize
-from fem_rag.ingest import Chunk
-from fem_rag.retrieval import ScoredChunk
+from silo_rag.eval import QAResult, _dedup_report_ids, _reciprocal_rank, _summarize_subset, summarize
+from silo_rag.ingest import Chunk
+from silo_rag.retrieval import ScoredChunk
 
 
 def _scored(report_id: str, score: float = 1.0) -> ScoredChunk:

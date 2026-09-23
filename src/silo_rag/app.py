@@ -4,9 +4,9 @@
 retrieval.search() と generation.answer_question() をこの層で初めて組み合わせる
 （両モジュールはDAG上お互いに依存しないよう独立実装されているため）。
 
-起動方法: streamlit run src/fem_rag/app.py
+起動方法: streamlit run src/silo_rag/app.py
 （`streamlit run` はファイルを直接実行するため、他モジュールのような相対import
-（`from .config import ...`）ではなく絶対import（`from fem_rag.config import ...`）を使う。
+（`from .config import ...`）ではなく絶対import（`from silo_rag.config import ...`）を使う。
 `pip install -e .` 済みであれば、cwdによらず絶対importで解決できる。）
 """
 
@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from fem_rag.config import load_config
-from fem_rag.datagen import DEPARTMENTS, PROJECT_TYPES
-from fem_rag.generation import Answer, answer_question
-from fem_rag.llm_client import LLMClient, LLMConnectionError
-from fem_rag.retrieval import ScoredChunk, search
+from silo_rag.config import load_config
+from silo_rag.datagen import DEPARTMENTS, PROJECT_TYPES
+from silo_rag.generation import Answer, answer_question
+from silo_rag.llm_client import LLMClient, LLMConnectionError
+from silo_rag.retrieval import ScoredChunk, search
 
 st.set_page_config(page_title="部署横断ナレッジ検索", page_icon="🔧")
 
