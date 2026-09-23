@@ -1,6 +1,6 @@
 # silo-rag project operating rules
 
-These apply on top of the workspace-wide rules (`/Users/satoshi/myFolder/.claude/CLAUDE.md`).
+These apply on top of the author's workspace-wide Claude Code rules (outside this repo).
 
 ## Document language
 
