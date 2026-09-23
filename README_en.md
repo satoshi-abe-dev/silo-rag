@@ -63,6 +63,10 @@ Adjust LM Studio's base URL and model names in `config.toml` (these can also be 
 
 ## Usage
 
+There are two ways to prepare data. Do either one, then launch the UI.
+
+### Using the demo data
+
 The prep work before launching the UI (generate synthetic data → ingest → evaluate) can be run in one command.
 
 ```bash
@@ -81,13 +85,6 @@ python -m silo_rag.ingest
 
 # Evaluate (retrieval accuracy + answer quality, combined into one report)
 python -m silo_rag.eval
-```
-
-Once the prep work is done, launch the UI (not included in the script — it's a foreground
-process that keeps a browser tab open, so run it yourself, separately from the prep step).
-
-```bash
-streamlit run src/silo_rag/app.py
 ```
 
 While `datagen` runs, you may see a "generation failed" warning — a small local LLM doesn't always follow the required heading structure exactly. It retries automatically, both per-report and for the whole batch, so just let it run and it'll usually succeed. If it still fails, try a different model or re-run `python -m silo_rag.datagen` after a bit.
@@ -110,6 +107,15 @@ you use. That said, the Streamlit UI's sidebar filters (department / project-typ
 are hardcoded to the demo's fixed vocabulary (`DEPARTMENTS` / `PROJECT_TYPES` in
 `datagen.py`), so they may not match your own data's categories (cross-department search
 itself still works fine without using the filters).
+
+### Launching the UI
+
+Either way you prepared the data, launch the UI last (not included in either path above —
+it's a foreground process that keeps a browser tab open, so run it yourself).
+
+```bash
+streamlit run src/silo_rag/app.py
+```
 
 ## Constraints and scope
 
@@ -158,7 +164,7 @@ What graph engineering — designing the pipeline as a DAG and making dependenci
 - **Parallel implementation**: nodes with no dependency on each other (C: retrieval, D: generation) were handed to two Agents (subagents) running at the same time.
 - **Independent testability**: every node can be tested on its own, with fakes like `_FakeVLMClient` and `_ScriptedClient` standing in for the real LLM/VLM calls — the whole test suite passes in CI with no live LLM connection at all.
 - **Bug localization**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node. It caught a real bug in `retrieval.py` (`BM25Okapi`'s IDF going negative and inverting the ranking) and a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`).
-- **Reusable module separation**: during the domain pivot (structural analysis → cross-department project lessons), swapping the system prompts, the test vocabulary, and the README were independent tasks that could be split across parallel Agents.
+- **Reusable module separation**: since each node is independent, rewriting or redoing just one of them later doesn't touch the others. In practice, follow-up changes like adjusting the system prompts, updating the test vocabulary, or revising the README have each been split across parallel Agents as independent tasks too.
 
 ## License
 
