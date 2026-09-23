@@ -99,16 +99,19 @@ def main() -> None:
         return
     question = question.strip()
 
+    # 会話履歴（指示語頼みのフォローアップ質問を検索・生成の両方で解決するために渡す）。
+    history = [(q, a.text) for q, a, _ in st.session_state.history] or None
+
     with st.spinner("検索・回答生成中..."):
         try:
-            scored = search(client, question, filters=filters or None)
+            scored = search(client, question, filters=filters or None, history=history)
         except RuntimeError as exc:
             # ChromaDBコレクション未作成（ingest未実行）などの構成エラー。
             st.error(str(exc))
             return
         chunks = [sc.chunk for sc in scored]
         try:
-            answer = answer_question(client, question, chunks)
+            answer = answer_question(client, question, chunks, history=history)
         except LLMConnectionError as exc:
             st.error(str(exc))
             return

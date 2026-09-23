@@ -22,6 +22,9 @@ from .llm_client import LLMClient
 
 _NO_CONTEXT_ANSWER = "該当する事例が見つかりませんでした。"
 
+_MAX_HISTORY_TURNS = 3
+_HISTORY_ANSWER_TRUNCATE = 200
+
 
 @dataclass
 class Citation:
@@ -53,12 +56,29 @@ def _build_context_block(index: int, chunk: Chunk) -> str:
     return f"{header}\n{chunk.text}"
 
 
-def _build_prompt(question: str, chunks: list[Chunk]) -> tuple[str, str]:
+def _build_history_block(history: list[tuple[str, str]] | None) -> str:
+    """会話履歴を、プロンプトに埋め込む1ブロックのテキストに整形する。履歴が無ければ空文字。"""
+    if not history:
+        return ""
+    lines = ["# これまでの会話（指示語の解決にのみ使う。事実の根拠にはしない）"]
+    for q, a in history[-_MAX_HISTORY_TURNS:]:
+        truncated = a if len(a) <= _HISTORY_ANSWER_TRUNCATE else a[:_HISTORY_ANSWER_TRUNCATE] + "…"
+        lines.append(f"Q: {q}")
+        lines.append(f"A: {truncated}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _build_prompt(
+    question: str, chunks: list[Chunk], history: list[tuple[str, str]] | None = None
+) -> tuple[str, str]:
     system = (
         "あなたは部署横断のプロジェクト知見・教訓に関する社内ナレッジ検索アシスタントです。"
         "以下の方針を厳守してください。\n"
         "- 回答は必ず、与えられた「出典」コンテキストに書かれている内容のみに基づいて作成してください。"
         "コンテキストに書かれていない事実を推測・創作しないでください。\n"
+        "- 会話履歴が付いている場合、指示語（「それ」「さっきの」等）の意味はそこから解決して"
+        "構いません。ただし事実の根拠には使わず、あくまで出典コンテキストだけを根拠にしてください"
+        "（履歴中の過去の回答は、LLMが生成した文章であり事実とは限らないため）。\n"
         "- 出典は、質問と全く同じ案件やプロジェクト種別である必要はありません。"
         "テーマや失敗パターンが似ている他部署の関連事例であれば、それが他部署の事例である旨を"
         "明記した上で、積極的に参考情報として回答に含めてください。これが本アシスタントの"
@@ -80,7 +100,8 @@ def _build_prompt(question: str, chunks: list[Chunk]) -> tuple[str, str]:
     )
 
     context_text = "\n\n---\n\n".join(_build_context_block(i, c) for i, c in enumerate(chunks, start=1))
-    user = f"""# 質問
+    history_block = _build_history_block(history)
+    user = f"""{history_block}# 質問
 {question}
 
 # 出典コンテキスト（この内容のみを根拠にしてください）
@@ -118,6 +139,7 @@ def answer_question(
     client: LLMClient,
     question: str,
     chunks: list[Chunk],
+    history: list[tuple[str, str]] | None = None,
 ) -> Answer:
     """質問と検索済みチャンクから、引用付きの回答を生成する。
 
@@ -125,12 +147,15 @@ def answer_question(
     このモジュールは検索を行わない。chunksが空の場合はLLMを呼ばず、該当事例なしの
     回答を返す（コンテキストなしでLLMに回答させるとハルシネーションの原因になるため）。
 
+    history: 直前までの会話（質問, 回答本文）のリスト。指定すると、指示語（「それ」等）の
+    解決に使う（事実の根拠には使わない。プロンプト側の指示で担保している）。
+
     LLMClient.chatが送出するLLMConnectionErrorはここで捕まえず、呼び出し元に伝播させる。
     """
     if not chunks:
         return Answer(text=_NO_CONTEXT_ANSWER, citations=[])
 
-    system, user = _build_prompt(question, chunks)
+    system, user = _build_prompt(question, chunks, history)
     text = client.chat(system, user)
     citations = _build_citations(chunks)
     return Answer(text=text, citations=citations)
