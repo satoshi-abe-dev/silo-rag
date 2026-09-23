@@ -4,9 +4,9 @@
 retrieval.search() と generation.answer_question() をこの層で初めて組み合わせる
 （両モジュールはDAG上お互いに依存しないよう独立実装されているため）。
 
-起動方法: streamlit run src/cae_rag/app.py
+起動方法: streamlit run src/fem_rag/app.py
 （`streamlit run` はファイルを直接実行するため、他モジュールのような相対import
-（`from .config import ...`）ではなく絶対import（`from cae_rag.config import ...`）を使う。
+（`from .config import ...`）ではなく絶対import（`from fem_rag.config import ...`）を使う。
 `pip install -e .` 済みであれば、cwdによらず絶対importで解決できる。）
 """
 
@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from cae_rag.config import load_config
-from cae_rag.datagen import ANALYSIS_TYPES, DEPARTMENTS
-from cae_rag.generation import Answer, answer_question
-from cae_rag.llm_client import LLMClient, LLMConnectionError
-from cae_rag.retrieval import ScoredChunk, search
+from fem_rag.config import load_config
+from fem_rag.datagen import ANALYSIS_TYPES, DEPARTMENTS
+from fem_rag.generation import Answer, answer_question
+from fem_rag.llm_client import LLMClient, LLMConnectionError
+from fem_rag.retrieval import ScoredChunk, search
 
 st.set_page_config(page_title="CAE解析ナレッジ検索", page_icon="🔧")
 

@@ -1,7 +1,7 @@
 """設定の読み込み。
 
 優先順位（強い順）:
-    1. 環境変数（CAERAG_ プレフィックス）
+    1. 環境変数（FEMRAG_ プレフィックス）
     2. TOML ファイル（既定は config.toml、無ければ config.example.toml）
     3. コード内のデフォルト値
 
@@ -22,7 +22,7 @@ def _find_repo_root() -> Path:
     """リポジトリのルートを探す。
 
     `pip install -e .`（本プロジェクトが前提とする導入方法）ならこのファイルは
-    リポジトリ内の src/cae_rag/config.py のまま残るので、pyproject.toml を目印に
+    リポジトリ内の src/fem_rag/config.py のまま残るので、pyproject.toml を目印に
     上へ辿れば見つかる。万一 `pip install .`（非editable）のように site-packages に
     コピーされていて見つからない場合は、通常のsrcレイアウトの相対位置（2つ上）に
     フォールバックする（その場合の動作は保証しない。本プロジェクトはeditable
@@ -41,7 +41,7 @@ DATA_DIR = REPO_ROOT / "data"
 SYNTH_REPORTS_DIR = DATA_DIR / "synth_reports"
 EVAL_DIR = DATA_DIR / "eval"
 CHROMA_DIR = DATA_DIR / "chroma_db"
-COLLECTION_NAME = "cae_reports"
+COLLECTION_NAME = "fem_reports"
 
 
 @dataclass
@@ -84,16 +84,16 @@ class Config:
 
 
 _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
-    "CAERAG_AI_BASE_URL": ("ai", "base_url", str),
-    "CAERAG_AI_API_KEY": ("ai", "api_key", str),
-    "CAERAG_AI_LLM_MODEL": ("ai", "llm_model", str),
-    "CAERAG_AI_EMBED_MODEL": ("ai", "embed_model", str),
-    "CAERAG_AI_VLM_MODEL": ("ai", "vlm_model", str),
-    "CAERAG_AI_TIMEOUT": ("ai", "timeout", float),
-    "CAERAG_AI_MAX_TOKENS": ("ai", "max_tokens", int),
-    "CAERAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),
-    "CAERAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
-    "CAERAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
+    "FEMRAG_AI_BASE_URL": ("ai", "base_url", str),
+    "FEMRAG_AI_API_KEY": ("ai", "api_key", str),
+    "FEMRAG_AI_LLM_MODEL": ("ai", "llm_model", str),
+    "FEMRAG_AI_EMBED_MODEL": ("ai", "embed_model", str),
+    "FEMRAG_AI_VLM_MODEL": ("ai", "vlm_model", str),
+    "FEMRAG_AI_TIMEOUT": ("ai", "timeout", float),
+    "FEMRAG_AI_MAX_TOKENS": ("ai", "max_tokens", int),
+    "FEMRAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),
+    "FEMRAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
+    "FEMRAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
 }
 
 _SECTION_TYPES = {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cae_rag.datagen import (
+from fem_rag.datagen import (
     ANALYSIS_TYPES,
     DEPARTMENTS,
     DEPT_TERMINOLOGY,
@@ -21,7 +21,7 @@ from cae_rag.datagen import (
     generate_eval_qa,
     generate_report_specs,
 )
-from cae_rag.llm_client import LLMConnectionError
+from fem_rag.llm_client import LLMConnectionError
 
 
 def test_generate_report_specs_deterministic_with_seed():
@@ -172,7 +172,7 @@ class _ScriptedClient:
 def test_generate_one_report_retries_after_validation_failure():
     # _generate_result_image()はmatplotlib依存で、このテストの関心（リトライ挙動）とは
     # 無関係なので、ここだけ差し替えてmatplotlibなしでも検証できるようにする。
-    import cae_rag.datagen as datagen_module
+    import fem_rag.datagen as datagen_module
 
     spec = _make_spec()
     headings = _required_headings(spec)
@@ -232,7 +232,7 @@ def test_result_image_section_matches_ingest_constant():
     """退行テスト: datagenとingestは互いに依存させない設計上、画像を添付する
     セクション名を別々の定数として持っている。ズレるとVLMキャプションが
     正しいセクションに合流しなくなるため、一致していることを保証する。"""
-    from cae_rag.ingest import RESULT_IMAGE_SECTION as INGEST_RESULT_IMAGE_SECTION
+    from fem_rag.ingest import RESULT_IMAGE_SECTION as INGEST_RESULT_IMAGE_SECTION
 
     assert RESULT_IMAGE_SECTION == INGEST_RESULT_IMAGE_SECTION
     assert RESULT_IMAGE_SECTION in _required_headings(_make_spec())
@@ -241,7 +241,7 @@ def test_result_image_section_matches_ingest_constant():
 def test_pdf_lines_round_trips_through_ingest_parser():
     """datagen._pdf_lines() の出力を、ingest._parse_pdf_text() でそのまま
     パースし直せることを確認する（pypdf/reportlabなしで往復ロジックだけ検証する）。"""
-    from cae_rag.ingest import _parse_pdf_text
+    from fem_rag.ingest import _parse_pdf_text
 
     spec = _make_spec()
     metadata = _metadata_dict(spec)
