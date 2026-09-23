@@ -41,7 +41,9 @@ DATA_DIR = REPO_ROOT / "data"
 SYNTH_REPORTS_DIR = DATA_DIR / "synth_reports"
 EVAL_DIR = DATA_DIR / "eval"
 CHROMA_DIR = DATA_DIR / "chroma_db"
-COLLECTION_NAME = "silo_reports"
+# パッケージ名やリポジトリ名とは独立させておく（改名のたびにコレクション名が変わり、
+# 既存のローカルインデックスが引き継げなくなる問題をcodexレビューで指摘され、修正した）。
+COLLECTION_NAME = "reports"
 
 
 @dataclass
