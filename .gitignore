@@ -21,8 +21,10 @@ __pycache__/
 # （プロジェクトのソースではない）
 .agents/
 
-# Claude Codeの内部管理用ディレクトリ（プロジェクトのソースではない）
-.claude/
+# Claude Codeの内部管理用ディレクトリ（プロジェクトのソースではない）。
+# ただし運用ルール .claude/CLAUDE.md だけは例外的に追跡する。
+.claude/*
+!.claude/CLAUDE.md
 
 # ユーザーの作業領域（スクリーンショット等）。プロジェクトのソースではない。
 temp/

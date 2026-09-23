@@ -1,5 +1,7 @@
 # CAE Analysis Knowledge Search Assistant
 
+[日本語](README_ja.md) | English
+
 A portfolio implementation of an internal **knowledge-search RAG** for structural analysis (FEM) in manufacturing (automotive parts). It lets engineers search and reuse past analysis reports across departments.
 
 ## Background and problem
