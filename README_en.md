@@ -155,6 +155,19 @@ graph LR
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 
+### What a "node" actually is
+
+A node is a unit of work with a clear input/output boundary. In this project, nodes A–F
+happen to line up one-to-one with a single file (module) each — each of the six
+responsibilities just happened to be the right size for one file. In general the granularity
+is a design choice: a node could be a single function, or a whole multi-file subsystem.
+
+Each node keeps its internals to itself. `retrieval.py`, for example, has several private
+(underscore-prefixed) helper functions like `_bm25_search` and `_vector_search`, but exposes
+only one public function, `search()` — callers (`app.py`, `eval.py`) never need to know
+whether it's using BM25, vector search, or how the reranking works. `generation.py` is the
+same: it exposes only `answer_question()` and keeps its prompt construction internal.
+
 ### How nodes actually connect
 
 Each arrow in the diagram is a different kind of connection under the hood.
@@ -186,6 +199,8 @@ What graph engineering — designing the pipeline as a DAG and making dependenci
 - **Independent testability**: every node can be tested on its own, with fakes like `_FakeVLMClient` and `_ScriptedClient` standing in for the real LLM/VLM calls — the whole test suite passes in CI with no live LLM connection at all.
 - **Bug localization**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node. It caught a real bug in `retrieval.py` (`BM25Okapi`'s IDF going negative and inverting the ranking) and a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`).
 - **Reusable module separation**: since each node is independent, rewriting or redoing just one of them later doesn't touch the others. In practice, follow-up changes like adjusting the system prompts, updating the test vocabulary, or revising the README have each been split across parallel Agents as independent tasks too.
+
+Worth being precise about: being able to decide a build order isn't a benefit unique to graph engineering — any complex system, whether built by AI or a human, needs its dependencies sorted out into some order regardless. What actually paid off in this project's context was finding the part that *didn't* need an order imposed on it (C/D) and parallelizing it, and being able to review and verify each node in a narrow, isolated scope. Both matter more in an AI-collaborative setup — multiple Agents working concurrently, with a different vendor's AI verifying each result — than they would in ordinary solo development.
 
 ## License
 
