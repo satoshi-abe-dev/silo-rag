@@ -110,12 +110,12 @@ graph LR
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
 | --- | --- | --- | --- |
-| A | `src/silo_rag/datagen.py` | - Generates dummy project-retrospective reports for a general business setting (house style varies slightly by department, randomly written out as Markdown/Word/Excel/PowerPoint/PDF, each with one synthesized outcome chart embedded)<br>- Generates gold-standard QA pairs for evaluation | `llm_model` (report body generation) |
-| B | `src/silo_rag/ingest.py` | - Chunks each of the 5 formats section-by-section using format-specific parsing logic<br>- Captions embedded images with a VLM<br>- Vectorizes chunks with a local embedding model and stores them in ChromaDB | - `embed_model` (chunk vectorization)<br>- `vlm_model` (outcome-chart captioning) |
-| C | `src/silo_rag/retrieval.py` | - Hybrid search combining BM25 (keyword) and vector similarity<br>- LLM-based reranking | - `embed_model` (query vectorization)<br>- `llm_model` (reranking) |
+| A | `src/silo_rag/datagen.py` | - Generates dummy retrospective reports (house style and file format randomized per department; embeds an outcome chart)<br>- Generates gold-standard QA pairs | `llm_model` (report body generation) |
+| B | `src/silo_rag/ingest.py` | - Chunks by heading (5 formats supported)<br>- Captions embedded images with a VLM<br>- Vectorizes and stores in ChromaDB | - `embed_model` (chunk vectorization)<br>- `vlm_model` (outcome-chart captioning) |
+| C | `src/silo_rag/retrieval.py` | - BM25 + vector-similarity hybrid search<br>- LLM-based reranking | - `embed_model` (query vectorization)<br>- `llm_model` (reranking) |
 | D | `src/silo_rag/generation.py` | - Generates answers grounded in retrieved chunks<br>- Attaches citations (report ID, section, **department**) | `llm_model` (answer generation) |
-| E | `src/silo_rag/eval.py` | - Measures retrieval accuracy (Recall@k, MRR) against gold-standard QA pairs<br>- Measures answer quality (a simple LLM-as-judge score, citation coverage) | - Every model used by C and D<br>- `llm_model` (LLM-as-judge scoring) |
-| F | `src/silo_rag/app.py` | - Streamlit chat UI<br>- Filter by department/project type, expandable citation sources | Every model used by C and D (invoked on every question) |
+| E | `src/silo_rag/eval.py` | - Measures retrieval accuracy (Recall@k, MRR)<br>- Measures answer quality (LLM-as-judge, citation coverage) | - Every model used by C and D<br>- `llm_model` (LLM-as-judge scoring) |
+| F | `src/silo_rag/app.py` | - Streamlit chat UI<br>- Filter by department/type, citation display | Every model used by C and D (invoked on every question) |
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 
