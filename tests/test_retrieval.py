@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 from silo_rag.ingest import Chunk
+from silo_rag.llm_client import LLMConnectionError
 from silo_rag.retrieval import (
     ScoredChunk,
+    _build_query_rewrite_prompt,
     _build_where,
     _normalize_bm25,
     _normalize_minmax,
     _parse_rerank_response,
+    _resolve_query,
     tokenize,
 )
 
@@ -111,3 +114,43 @@ def test_parse_rerank_response_returns_none_on_broken_json():
 def test_parse_rerank_response_extracts_array_from_surrounding_text():
     order = _parse_rerank_response("回答: [2, 1] です。", 2)
     assert order == [2, 1]
+
+
+def test_build_query_rewrite_prompt_includes_history_and_question():
+    prompt = _build_query_rewrite_prompt(
+        "それについてもう少し詳しく", [("マーケの施策で参考事例は？", "RPT-001が参考になります。")]
+    )
+    assert "Q: マーケの施策で参考事例は？" in prompt
+    assert "A: RPT-001が参考になります。" in prompt
+    assert "新しい質問: それについてもう少し詳しく" in prompt
+
+
+class _StubLLMClient:
+    def __init__(self, response: str | None = None, raises: bool = False):
+        self.response = response
+        self.raises = raises
+        self.calls = 0
+
+    def chat(self, system: str, user: str, **kwargs) -> str:
+        self.calls += 1
+        if self.raises:
+            raise LLMConnectionError("接続失敗")
+        return self.response
+
+
+def test_resolve_query_without_history_skips_llm_call():
+    client = _StubLLMClient(response="呼ばれたら困る")
+    assert _resolve_query(client, "質問", []) == "質問"
+    assert client.calls == 0
+
+
+def test_resolve_query_returns_rewritten_query():
+    client = _StubLLMClient(response="マーケティング部の新商品ローンチキャンペーンの失敗事例")
+    result = _resolve_query(client, "それについてもう少し詳しく", [("元の質問", "元の回答")])
+    assert result == "マーケティング部の新商品ローンチキャンペーンの失敗事例"
+    assert client.calls == 1
+
+
+def test_resolve_query_falls_back_to_original_on_llm_failure():
+    client = _StubLLMClient(raises=True)
+    assert _resolve_query(client, "元の質問", [("前の質問", "前の回答")]) == "元の質問"

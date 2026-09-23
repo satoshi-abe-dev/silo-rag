@@ -81,16 +81,20 @@ def search(
     *,
     top_k: int | None = None,
     filters: dict[str, str] | None = None,
+    history: list[tuple[str, str]] | None = None,
 ) -> list[ScoredChunk]:
     """ハイブリッド検索（BM25＋ベクトル）→ スコア統合 → LLMリランキングを行う。
 
     top_k: 最終的に返す件数。Noneならconfig.retrieval.top_k_finalを使う。
     filters: メタデータの完全一致フィルタ（例: {"dept": "マーケティング部"}）。複数キー指定時はAND条件。
+    history: 直前までの会話（質問, 回答本文）のリスト。指定すると、検索前にqueryを
+        履歴込みで独立した検索クエリに書き換える（フォローアップ質問での検索精度向上のため）。
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
     top_k_candidates = config.retrieval.top_k_candidates
     vector_weight = config.retrieval.vector_weight
+    query = _resolve_query(client, query, history) if history else query
 
     import chromadb
 
@@ -149,6 +153,51 @@ def search(
     candidates = [ScoredChunk(chunk=chunk_map[chunk_id], score=score) for chunk_id, score in combined]
     reranked = _llm_rerank(client, query, candidates)
     return reranked[:resolved_top_k]
+
+
+# --- 会話履歴を踏まえたクエリ書き換え -------------------------------------------
+
+_MAX_HISTORY_TURNS = 3
+_HISTORY_ANSWER_TRUNCATE = 200
+
+_QUERY_REWRITE_SYSTEM_PROMPT = (
+    "あなたは検索クエリの書き換え役です。会話履歴と、それに続く新しい質問を読み、"
+    "履歴を見なくても意味が伝わる独立した検索クエリ1文に書き換えてください。"
+    "新しい質問がそれ単体で意味が通る場合（履歴に依存しない新しい話題の場合）は、"
+    "書き換えずそのまま返してください。"
+    "出力は書き換え後の質問文のみとし、説明や前置き・引用符は一切含めないでください。"
+)
+
+
+def _build_query_rewrite_prompt(question: str, history: list[tuple[str, str]]) -> str:
+    lines = ["会話履歴:"]
+    for q, a in history[-_MAX_HISTORY_TURNS:]:
+        truncated = a if len(a) <= _HISTORY_ANSWER_TRUNCATE else a[:_HISTORY_ANSWER_TRUNCATE] + "…"
+        lines.append(f"Q: {q}")
+        lines.append(f"A: {truncated}")
+    lines.append("")
+    lines.append(f"新しい質問: {question}")
+    return "\n".join(lines)
+
+
+def _resolve_query(client: LLMClient, question: str, history: list[tuple[str, str]]) -> str:
+    """会話履歴を踏まえて、質問を検索エンジンにかけられる独立したクエリに書き換える。
+
+    「それについてもう少し詳しく」のような指示語頼みの質問は、そのままBM25/ベクトル検索に
+    かけても検索語が乏しく空振りする。LLMに履歴込みで読ませ、履歴が無くても意味が通る
+    検索クエリに書き換えさせる（rerankと同じ理由でtemperature=0.0にし、書き換えのブレを抑える）。
+
+    LLM呼び出しに失敗した場合は書き換えを諦め、元の質問文をそのまま返す
+    （検索自体は動かしたいので、ここでの失敗によって検索全体を止めない）。
+    """
+    if not history:
+        return question
+    prompt = _build_query_rewrite_prompt(question, history)
+    try:
+        rewritten = client.chat(_QUERY_REWRITE_SYSTEM_PROMPT, prompt, temperature=0.0)
+    except LLMConnectionError:
+        return question
+    return rewritten.strip() or question
 
 
 # --- BM25候補検索 -------------------------------------------------------------

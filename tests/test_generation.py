@@ -3,7 +3,14 @@
 
 from __future__ import annotations
 
-from silo_rag.generation import Citation, _build_citations, _build_context_block, answer_question
+from silo_rag.generation import (
+    Citation,
+    _build_citations,
+    _build_context_block,
+    _build_history_block,
+    _build_prompt,
+    answer_question,
+)
 from silo_rag.ingest import Chunk
 
 
@@ -57,3 +64,66 @@ def test_answer_question_with_no_chunks_skips_llm_call():
     answer = answer_question(_NeverCallLLMClient(), "質問", [])
     assert answer.citations == []
     assert answer.text  # 何らかの「見つかりませんでした」系メッセージが返る
+
+
+def test_build_history_block_empty_for_no_history():
+    assert _build_history_block(None) == ""
+    assert _build_history_block([]) == ""
+
+
+def test_build_history_block_includes_qa_pairs():
+    block = _build_history_block([("マーケの施策で参考事例は？", "RPT-001の事例が参考になります。")])
+    assert "Q: マーケの施策で参考事例は？" in block
+    assert "A: RPT-001の事例が参考になります。" in block
+
+
+def test_build_history_block_truncates_long_answers():
+    long_answer = "あ" * 300
+    block = _build_history_block([("質問", long_answer)])
+    assert "あ" * 200 + "…" in block
+    assert "あ" * 201 not in block
+
+
+def test_build_history_block_caps_to_last_n_turns():
+    history = [(f"質問{i}", f"回答{i}") for i in range(1, 6)]  # 5往復
+    block = _build_history_block(history)
+    assert "質問1" not in block  # 直近3往復だけが残る
+    assert "質問2" not in block
+    assert "質問3" in block
+    assert "質問5" in block
+
+
+class _RecordingLLMClient:
+    """.chatに渡された(system, user)を記録するだけのフェイク。"""
+
+    def __init__(self, response: str = "回答本文"):
+        self.response = response
+        self.calls: list[tuple[str, str]] = []
+
+    def chat(self, system: str, user: str, **kwargs) -> str:
+        self.calls.append((system, user))
+        return self.response
+
+
+def test_build_prompt_places_history_before_question():
+    chunks = [_chunk("RPT-001", "教訓・つまずいたポイント", "マーケティング部", text="本文")]
+    _, user = _build_prompt("それについてもう少し詳しく", chunks, [("元の質問", "元の回答")])
+    assert user.index("Q: 元の質問") < user.index("# 質問")
+
+
+def test_answer_question_passes_history_into_prompt():
+    client = _RecordingLLMClient()
+    chunks = [_chunk("RPT-001", "教訓・つまずいたポイント", "マーケティング部", text="本文")]
+    answer_question(client, "それについてもう少し詳しく", chunks, history=[("元の質問", "元の回答")])
+    assert len(client.calls) == 1
+    _, user = client.calls[0]
+    assert "元の質問" in user
+    assert "元の回答" in user
+
+
+def test_answer_question_without_history_omits_history_block():
+    client = _RecordingLLMClient()
+    chunks = [_chunk("RPT-001", "教訓・つまずいたポイント", "マーケティング部", text="本文")]
+    answer_question(client, "質問", chunks)
+    _, user = client.calls[0]
+    assert "これまでの会話" not in user
