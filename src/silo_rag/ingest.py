@@ -24,6 +24,7 @@ PowerPointなら1枚目のスライド、PDFなら先頭のテキスト）から
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import re
 from dataclasses import dataclass
@@ -367,7 +368,8 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
 
     report_paths = _find_report_paths(reports_dir)
     if not report_paths:
-        raise SystemExit(f"{reports_dir} にレポートが見つかりません。先にdatagenを実行してください。")
+        hint = "先にdatagenを実行してください。" if reports_dir == SYNTH_REPORTS_DIR else ""
+        raise SystemExit(f"{reports_dir} にレポートが見つかりません。{hint}")
 
     config = load_config()
     chroma_dir.mkdir(parents=True, exist_ok=True)
@@ -424,7 +426,16 @@ def _delete_collection_if_exists(client, name: str) -> None:
 
 
 def main() -> None:
-    count = ingest()
+    parser = argparse.ArgumentParser(description="レポートをチャンキング・埋め込みしてChromaDBに格納")
+    parser.add_argument(
+        "--reports-dir",
+        type=Path,
+        default=SYNTH_REPORTS_DIR,
+        help="読み込むレポートのディレクトリ（既定: datagenの出力先）。自前データを使う場合はここを指定する",
+    )
+    args = parser.parse_args()
+
+    count = ingest(reports_dir=args.reports_dir)
     print(f"ingest完了: {count} チャンクを {CHROMA_DIR} に格納しました。")
 
 

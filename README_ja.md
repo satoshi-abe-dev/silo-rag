@@ -69,7 +69,7 @@ UI起動前の下準備（合成データ生成 → 取り込み → 評価）�
 bash scripts/prepare_demo_data.sh
 ```
 
-内部で以下を順番に実行しているだけなので、個別ステップだけやり直したい場合は直接叩けばよい
+内部で以下の3つを順番に実行しているだけなので、個別ステップだけやり直したい場合は直接叩けばよい
 （各ステップの内部設計は後述の[アーキテクチャ](#アーキテクチャdag)を参照）。
 
 ```bash
@@ -81,14 +81,35 @@ python -m silo_rag.ingest
 
 # 評価（検索精度・回答品質をまとめてレポート）
 python -m silo_rag.eval
+```
 
-# Streamlit UIの起動
+下準備が終わったら、UIを起動する（これはスクリプトに含まれていない。ブラウザが開いたままになる
+フォアグラウンドのプロセスなので、下準備とは別に自分で叩く）。
+
+```bash
 streamlit run src/silo_rag/app.py
 ```
 
 `datagen`実行中に「生成に失敗しました」という警告が出ることがある（小規模なローカルLLMが指定した見出し構成を毎回厳密には守れないため）。レポート単位・バッチ全体の両方で自動的にリトライするので、そのまま待てば通常は成功する。それでも失敗する場合は、ロードしているモデルを変えるか、少し時間を置いて `python -m silo_rag.datagen` を再実行する。
 
 `python -m silo_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付きで、区分ごとにhit_rate・recall@k・MRR・citation_rate・avg_judge_scoreを集計する）。実際の数値はLM Studioにロードしたモデルとデータセットに依存する。
+
+### 自前のレポートで使う
+
+`prepare_demo_data.sh`（および`datagen`・`eval`）はあくまで合成デモデータを試すためのもの。
+自前のレポートで使う場合は`datagen`・`eval`を実行せず、`ingest`だけ次のように実行する
+（`eval`は合成データ専用のgold-standard QAペアが前提のため、自前データには使えない）。
+
+```bash
+python -m silo_rag.ingest --reports-dir path/to/your/reports
+```
+
+`ingest`のパーサー自体は汎用的で、`---`フロントマター＋`## 見出し`単位で区切られた
+Markdown/Word/Excel/PowerPoint/PDFであれば、フィールド名や見出し名が自由でも読み込める。
+ただしStreamlit UIのサイドバーの絞り込み（部署・プロジェクト種別のドロップダウン）は、
+デモ用の固定語彙（`datagen.py`の`DEPARTMENTS`・`PROJECT_TYPES`）をそのまま使っているため、
+自前データの分類語彙とは一致しない可能性がある（絞り込みを使わなければ、横断検索自体は
+問題なく機能する）。
 
 ## 制約・スコープ
 

@@ -69,7 +69,7 @@ The prep work before launching the UI (generate synthetic data → ingest → ev
 bash scripts/prepare_demo_data.sh
 ```
 
-It just runs the following in order, so run them directly if you want to redo a single step
+It just runs these three in order, so run them directly if you want to redo a single step
 (see [Architecture](#architecture-dag) below for how each step is designed internally).
 
 ```bash
@@ -81,14 +81,35 @@ python -m silo_rag.ingest
 
 # Evaluate (retrieval accuracy + answer quality, combined into one report)
 python -m silo_rag.eval
+```
 
-# Launch the Streamlit UI
+Once the prep work is done, launch the UI (not included in the script — it's a foreground
+process that keeps a browser tab open, so run it yourself, separately from the prep step).
+
+```bash
 streamlit run src/silo_rag/app.py
 ```
 
 While `datagen` runs, you may see a "generation failed" warning — a small local LLM doesn't always follow the required heading structure exactly. It retries automatically, both per-report and for the whole batch, so just let it run and it'll usually succeed. If it still fails, try a different model or re-run `python -m silo_rag.datagen` after a bit.
 
 `python -m silo_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, each with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The actual numbers depend on whichever models — and dataset — are loaded in LM Studio.
+
+### Using your own reports
+
+`prepare_demo_data.sh` (and `datagen`/`eval`) is purely for trying the synthetic demo data.
+To use your own reports, skip `datagen` and `eval` and just run `ingest` directly
+(`eval` needs the synthetic gold-standard QA pairs, so it doesn't apply to your own data):
+
+```bash
+python -m silo_rag.ingest --reports-dir path/to/your/reports
+```
+
+`ingest`'s parser itself is generic — any Markdown/Word/Excel/PowerPoint/PDF file split into
+a `---` frontmatter block plus `## heading` sections works, whatever field or heading names
+you use. That said, the Streamlit UI's sidebar filters (department / project-type dropdowns)
+are hardcoded to the demo's fixed vocabulary (`DEPARTMENTS` / `PROJECT_TYPES` in
+`datagen.py`), so they may not match your own data's categories (cross-department search
+itself still works fine without using the filters).
 
 ## Constraints and scope
 
