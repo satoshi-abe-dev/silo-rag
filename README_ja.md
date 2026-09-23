@@ -98,8 +98,10 @@ python -m silo_rag.eval
 （`eval`は合成データ専用のgold-standard QAペアが前提のため、自前データには使えない）。
 
 ```bash
-python -m silo_rag.ingest --reports-dir path/to/your/reports
+python -m silo_rag.ingest --reports-dir <自分のレポートファイルが入っているディレクトリのパス>
 ```
+
+（`<...>`部分は実際のパスに置き換える。例: `--reports-dir ~/Documents/reports`）
 
 `ingest`のパーサー自体は汎用的で、`---`フロントマター＋`## 見出し`単位で区切られた
 Markdown/Word/Excel/PowerPoint/PDFであれば、フィールド名や見出し名が自由でも読み込める。
