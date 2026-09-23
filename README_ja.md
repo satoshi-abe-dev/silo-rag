@@ -40,10 +40,14 @@
 ### インストール
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 # 開発（テスト・lint）も行う場合
 pip install -e ".[dev]"
 ```
+
+Streamlit・ChromaDB等の依存パッケージはこのコマンドでまとめてインストールされる（`streamlit`を個別にインストールする必要はない）。以降のコマンドは、この仮想環境を有効化した状態（`source .venv/bin/activate`）で実行する。
 
 ### 設定
 

@@ -40,10 +40,14 @@ This project demonstrates a value proposition: **as long as documents are kept i
 ### Install
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 # If you're also doing development (tests, lint):
 pip install -e ".[dev]"
 ```
+
+This installs Streamlit, ChromaDB, and every other dependency in one go — no need to `pip install streamlit` separately. Run every command below with this virtual environment activated (`source .venv/bin/activate`).
 
 ### Configure
 
