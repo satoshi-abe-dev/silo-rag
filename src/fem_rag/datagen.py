@@ -10,7 +10,7 @@
       割り当てる（部署には固定しない。現場でファイル形式が混在している状況の再現）。
     - 対象は構造解析（FEM）のみ。熱解析・CFD等は対象外。
 
-生成はローカルLLM（LM Studio等、OpenAI互換API）経由。`python -m cae_rag.datagen` で実行する。
+生成はローカルLLM（LM Studio等、OpenAI互換API）経由。`python -m fem_rag.datagen` で実行する。
 """
 
 from __future__ import annotations
