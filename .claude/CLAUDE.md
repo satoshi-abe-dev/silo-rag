@@ -1,36 +1,41 @@
-# cae-rag プロジェクト運用ルール
+# cae-rag project operating rules
 
-ワークスペース共通ルール（`/Users/satoshi/myFolder/.claude/CLAUDE.md`）に加えて、このプロジェクト固有のルール。
+These apply on top of the workspace-wide rules (`/Users/satoshi/myFolder/.claude/CLAUDE.md`).
 
-## ブランチ運用
+## Document language
 
-- `main`への直接commit・pushはしない。作業はブランチを切り、`gh pr create`でPRを作成する。
-- PRのマージはユーザーの明示的な許可を得てから行う（下記チェックリストを満たした上で）。
+- A document that only needs to exist in one language (this file included) is written in English, following the `meeting-minutes` project's convention.
+- This doesn't apply to documents that are deliberately bilingual pairs, such as `README_ja.md` / `README_en.md` — see the README section below.
 
-## commit / PRの言語
+## Branching
 
-- commitメッセージ・PRのタイトルと説明文は今後英語で書く（過去の日本語commit履歴は書き換えない）。
-- ユーザーとの会話（chat応答）は引き続き日本語のまま。
+- No direct commits or pushes to `main`. Work happens on a branch, opened as a PR via `gh pr create`.
+- Merge a PR only after the user has explicitly approved it (and the checklist below is satisfied).
 
-## PRマージ前チェックリスト
+## Commit / PR language
 
-PRをmainにマージする前に、以下を確認する。
+- Commit messages and PR titles/descriptions are written in English going forward. (Past Japanese commit history is not rewritten.)
+- Conversational replies to the user stay in Japanese as before.
 
-- `.gitignore` が `config.toml` / `data/chroma_db/` などを正しく除外できている
-- diffが意図した範囲に収まっている（Issue/依頼の範囲を超えた変更が混入していない）
-- テストがパスしている（`pytest`）
-- force push・履歴書き換えなど破壊的操作が含まれていない
-- 独立レビュー（`codex` CLIなど別ベンダーのAIによるレビュー）を通し、指摘があれば修正・再レビュー済み
+## Pre-merge checklist
 
-## 設定・権限ファイルの変更
+Before merging a PR into `main`, confirm:
 
-- `config.toml` / このディレクトリの `CLAUDE.md` / permission設定（`settings.json`等）を変更する場合は、事前にユーザーへ確認を取る。
+- `.gitignore` correctly excludes `config.toml` / `data/chroma_db/` etc.
+- The diff stays within the intended scope (nothing beyond the corresponding issue/request has crept in).
+- Tests pass (`pytest`).
+- No destructive operations (force push, history rewrite, etc.) are included.
+- An independent review (e.g. the `codex` CLI, a different vendor's AI) has been run, with any findings fixed and re-reviewed.
 
-## README対訳ルール
+## Changing config/permission files
 
-- `README_ja.md` を編集したら、同じ変更（文言・順序など）を `README_en.md` にも反映する。どちらか片方だけの変更を残さない。
-- 逆方向（`README_en.md` を先に編集した場合）も同様。
+- Get the user's confirmation before changing `config.toml`, this directory's `CLAUDE.md`, or permission settings (`settings.json`, etc.).
 
-## 翻訳品質
+## README translation pairing
 
-- 日本語→英語の翻訳（ドキュメント、commitメッセージ等）は、直訳ではなく自然で慣用的な英語表現を優先する。意味・技術的正確さは保ったまま、文構造や語順は英語ネイティブが書くように組み替える。
+- If you edit `README_ja.md`, apply the same change (wording, ordering, etc.) to `README_en.md` too. Never leave a change to just one side.
+- The same applies in the other direction, if `README_en.md` is edited first.
+
+## Translation quality
+
+- When translating Japanese into English (docs, commit messages, etc.), prefer natural, idiomatic English phrasing over a literal, word-for-word translation. Preserve the exact meaning and technical accuracy, but rephrase sentence structure and word order the way a native English writer would.
