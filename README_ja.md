@@ -96,7 +96,7 @@ streamlit run src/silo_rag/app.py
 
 ## アーキテクチャ（DAG）
 
-処理をモジュール間の依存関係が明確なDAG（有向非巡回グラフ）として設計した。依存のないノード（retrieval / generation）は独立に実装できる。
+処理をモジュール間の依存関係が明確なDAG（directed acyclic graph）（有向非巡回グラフ）として設計した。依存のないノード（retrieval / generation）は独立に実装できる。
 
 ```mermaid
 graph LR
