@@ -127,6 +127,7 @@ streamlit run src/silo_rag/app.py
 - No company names are used, real or fictional
 - Designed to be industry- and role-agnostic rather than tied to one specific domain
 - **The application itself (UI, generated data, LLM prompts) is Japanese-only.** This README being bilingual is purely for portfolio readability, separate from the app's own language support
+- **Conversation history is used only to interpret follow-up search questions** (e.g. "tell me more about that"). It doesn't support meta-questions about the conversation itself, like "do you remember what I just said?" — that's not a department-knowledge search question, so the assistant intentionally declines with "no matching case found"
 
 > 💡 **If you just want to run it, this is all you need.** From here on it's the internals of the DAG and the development process (graph engineering + independent review).
 
