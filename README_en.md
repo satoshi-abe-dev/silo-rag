@@ -6,11 +6,12 @@
 
 > 🧭 **The requirements and design decisions here are the author's own.** The main ones:
 >
-> - Not tying file formats (Markdown/Word/Excel/PowerPoint/PDF) to a department — each report's format is chosen at random, and non-uniformity across departments is instead expressed through terminology (how section headings are phrased)
-> - Embedding one result image per report and captioning it with a VLM at ingest time so it's searchable too
-> - The architecture choice to run everything on a local LLM with zero external transmission — a realistic constraint for manufacturing, where confidential design information is at stake
-> - The development-process design: splitting implementation along DAG nodes, implementing independent nodes (retrieval/generation) in parallel, and making an independent review from a different vendor's AI (the `codex` CLI) a required gate after each node
+> - The retrieval pipeline design: hybrid search (BM25 + vector similarity) followed by LLM reranking. Caught and fixed a real bug where `BM25Okapi`'s IDF went negative and inverted the ranking under this project's specific conditions (a small corpus plus a character-bigram tokenizer) — switched to `BM25Plus` to fix it
+> - Always attaching citations (report ID, section, **department**) to generated answers, so that "does cross-department search and reuse actually work" can be verified rather than assumed
 > - The evaluation design: scoring cross-department and same-department questions separately, so the cross-department search claim can be checked numerically rather than asserted
+> - Also captioning result images with a VLM at ingest time so they're searchable too — a multimodal ingest design
+> - The architecture choice to run everything on a local LLM with zero external transmission — a realistic constraint for manufacturing, where confidential design information is at stake
+> - The development-process design: splitting implementation along DAG nodes, implementing independent nodes in parallel, and making an independent review from a different vendor's AI (the `codex` CLI) a required gate after each node
 
 > The reasoning behind each decision is in [Development process](#development-process-graph-engineering--independent-review) below. Implementation used AI (Claude Code) as a pair-programming partner, credited via `Co-Authored-By` on commits.
 
