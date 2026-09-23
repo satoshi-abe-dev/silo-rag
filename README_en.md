@@ -94,6 +94,23 @@ While `datagen` runs, you may see a "generation failed" warning — a small loca
 
 `python -m silo_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, each with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The actual numbers depend on whichever models — and dataset — are loaded in LM Studio.
 
+### Using your own reports
+
+`prepare_demo_data.sh` (and `datagen`/`eval`) is purely for trying the synthetic demo data.
+To use your own reports, skip `datagen` and `eval` and just run `ingest` directly
+(`eval` needs the synthetic gold-standard QA pairs, so it doesn't apply to your own data):
+
+```bash
+python -m silo_rag.ingest --reports-dir path/to/your/reports
+```
+
+`ingest`'s parser itself is generic — any Markdown/Word/Excel/PowerPoint/PDF file split into
+a `---` frontmatter block plus `## heading` sections works, whatever field or heading names
+you use. That said, the Streamlit UI's sidebar filters (department / project-type dropdowns)
+are hardcoded to the demo's fixed vocabulary (`DEPARTMENTS` / `PROJECT_TYPES` in
+`datagen.py`), so they may not match your own data's categories (cross-department search
+itself still works fine without using the filters).
+
 ## Constraints and scope
 
 - Since the data is synthetic, the numbers and cases aren't drawn from real practice
