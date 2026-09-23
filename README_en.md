@@ -51,7 +51,7 @@ pip install -e ".[dev]"
 cp config.example.toml config.toml
 ```
 
-Adjust LM Studio's base URL and model names in `config.toml` (these can also be overridden via environment variables such as `FEMRAG_AI_LLM_MODEL` — see `src/fem_rag/config.py` for details).
+Adjust LM Studio's base URL and model names in `config.toml` (these can also be overridden via environment variables such as `SILORAG_AI_LLM_MODEL` — see `src/silo_rag/config.py` for details).
 
 ## Usage
 
@@ -59,19 +59,19 @@ Run the following in order (see [Architecture](#architecture-dag) below for how 
 
 ```bash
 # Generate synthetic data (60 reports + 15 evaluation QA pairs by default)
-python -m fem_rag.datagen
+python -m silo_rag.datagen
 
 # Chunk + embed + store in ChromaDB
-python -m fem_rag.ingest
+python -m silo_rag.ingest
 
 # Evaluate (retrieval accuracy + answer quality, combined into one report)
-python -m fem_rag.eval
+python -m silo_rag.eval
 
 # Launch the Streamlit UI
-streamlit run src/fem_rag/app.py
+streamlit run src/silo_rag/app.py
 ```
 
-`python -m fem_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, each with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The actual numbers depend on whichever models — and dataset — are loaded in LM Studio.
+`python -m silo_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, each with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The actual numbers depend on whichever models — and dataset — are loaded in LM Studio.
 
 ## Constraints and scope
 
@@ -99,12 +99,12 @@ graph LR
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
 | --- | --- | --- | --- |
-| A | `src/fem_rag/datagen.py` | Generates dummy project-retrospective reports for a general business setting (house style varies slightly by department, randomly written out as Markdown/Word/Excel/PowerPoint/PDF, each with one synthesized outcome chart embedded) plus gold-standard QA pairs for evaluation | `llm_model` (report body generation) |
-| B | `src/fem_rag/ingest.py` | Chunks each of the 5 formats section-by-section using format-specific parsing logic, captions embedded images with a VLM, then vectorizes chunks with a local embedding model and stores them in ChromaDB | `embed_model` (chunk vectorization) / `vlm_model` (outcome-chart captioning) |
-| C | `src/fem_rag/retrieval.py` | Hybrid search combining BM25 (keyword) and vector similarity, followed by LLM-based reranking | `embed_model` (query vectorization) / `llm_model` (reranking) |
-| D | `src/fem_rag/generation.py` | Generates answers grounded in retrieved chunks, with citations (report ID, section, **department**) | `llm_model` (answer generation) |
-| E | `src/fem_rag/eval.py` | Measures retrieval accuracy (Recall@k, MRR) and answer quality (a simple LLM-as-judge score, citation coverage) against gold-standard QA pairs | Every model used by C and D, plus `llm_model` (LLM-as-judge scoring) |
-| F | `src/fem_rag/app.py` | Streamlit chat UI (filter by department/project type, expandable citation sources) | Every model used by C and D (invoked on every question) |
+| A | `src/silo_rag/datagen.py` | Generates dummy project-retrospective reports for a general business setting (house style varies slightly by department, randomly written out as Markdown/Word/Excel/PowerPoint/PDF, each with one synthesized outcome chart embedded) plus gold-standard QA pairs for evaluation | `llm_model` (report body generation) |
+| B | `src/silo_rag/ingest.py` | Chunks each of the 5 formats section-by-section using format-specific parsing logic, captions embedded images with a VLM, then vectorizes chunks with a local embedding model and stores them in ChromaDB | `embed_model` (chunk vectorization) / `vlm_model` (outcome-chart captioning) |
+| C | `src/silo_rag/retrieval.py` | Hybrid search combining BM25 (keyword) and vector similarity, followed by LLM-based reranking | `embed_model` (query vectorization) / `llm_model` (reranking) |
+| D | `src/silo_rag/generation.py` | Generates answers grounded in retrieved chunks, with citations (report ID, section, **department**) | `llm_model` (answer generation) |
+| E | `src/silo_rag/eval.py` | Measures retrieval accuracy (Recall@k, MRR) and answer quality (a simple LLM-as-judge score, citation coverage) against gold-standard QA pairs | Every model used by C and D, plus `llm_model` (LLM-as-judge scoring) |
+| F | `src/silo_rag/app.py` | Streamlit chat UI (filter by department/project type, expandable citation sources) | Every model used by C and D (invoked on every question) |
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 

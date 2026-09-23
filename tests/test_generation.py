@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from fem_rag.generation import Citation, _build_citations, _build_context_block, answer_question
-from fem_rag.ingest import Chunk
+from silo_rag.generation import Citation, _build_citations, _build_context_block, answer_question
+from silo_rag.ingest import Chunk
 
 
 def _chunk(report_id: str, section: str, dept: str, text: str = "本文") -> Chunk:

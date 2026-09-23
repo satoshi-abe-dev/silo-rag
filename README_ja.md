@@ -51,7 +51,7 @@ pip install -e ".[dev]"
 cp config.example.toml config.toml
 ```
 
-`config.toml` でLM StudioのベースURL・モデル名を調整する（環境変数 `FEMRAG_AI_LLM_MODEL` 等でも上書き可能。詳細は `src/fem_rag/config.py` 参照）。
+`config.toml` でLM StudioのベースURL・モデル名を調整する（環境変数 `SILORAG_AI_LLM_MODEL` 等でも上書き可能。詳細は `src/silo_rag/config.py` 参照）。
 
 ## 使い方
 
@@ -59,19 +59,19 @@ cp config.example.toml config.toml
 
 ```bash
 # 合成データ生成（デフォルト60件のレポート + 15件の評価QAペア）
-python -m fem_rag.datagen
+python -m silo_rag.datagen
 
 # チャンキング + 埋め込み + ChromaDBへの格納
-python -m fem_rag.ingest
+python -m silo_rag.ingest
 
 # 評価（検索精度・回答品質をまとめてレポート）
-python -m fem_rag.eval
+python -m silo_rag.eval
 
 # Streamlit UIの起動
-streamlit run src/fem_rag/app.py
+streamlit run src/silo_rag/app.py
 ```
 
-`python -m fem_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付きで、区分ごとにhit_rate・recall@k・MRR・citation_rate・avg_judge_scoreを集計する）。実際の数値はLM Studioにロードしたモデルとデータセットに依存する。
+`python -m silo_rag.eval` の実行結果は `data/eval/eval_results.json` に書き出される（overall / cross_dept / same_dept の内訳付きで、区分ごとにhit_rate・recall@k・MRR・citation_rate・avg_judge_scoreを集計する）。実際の数値はLM Studioにロードしたモデルとデータセットに依存する。
 
 ## 制約・スコープ
 
@@ -99,12 +99,12 @@ graph LR
 
 | ノード | モジュール | 役割 | 使用モデル（`config.toml`の`[ai]`） |
 | --- | --- | --- | --- |
-| A | `src/fem_rag/datagen.py` | 業界・職種を問わない社内プロジェクトのダミー振り返りレポート（部署ごとにハウススタイルが微妙に異なり、Markdown/Word/Excel/PowerPoint/PDFのいずれかにランダムに書き出す。成果画像も1枚合成して埋め込む）と評価用QAペアを生成 | `llm_model`（レポート本文生成） |
-| B | `src/fem_rag/ingest.py` | 5形式それぞれの読み取りロジックで見出し単位にチャンキングし、埋め込み画像をVLMでキャプション化してから、ローカル埋め込みモデルでベクトル化しChromaDBに格納 | `embed_model`（チャンクのベクトル化）／`vlm_model`（成果画像のキャプション化） |
-| C | `src/fem_rag/retrieval.py` | BM25（キーワード）＋ベクトル類似度のハイブリッド検索 → LLMによるリランキング | `embed_model`（クエリのベクトル化）／`llm_model`（リランキング） |
-| D | `src/fem_rag/generation.py` | 検索済みチャンクを根拠に、出典（レポートID・セクション・**部署**）付きの回答を生成 | `llm_model`（回答生成） |
-| E | `src/fem_rag/eval.py` | gold-standard QAペアに対する検索精度（Recall@k, MRR）と回答品質（簡易LLM-as-judge, 引用網羅率）を測定 | C・Dが使う全モデル＋`llm_model`（LLM-as-judge採点） |
-| F | `src/fem_rag/app.py` | Streamlitチャット UI（部署・プロジェクト種別での絞り込み、引用元の展開表示） | C・Dが使う全モデル（質問のたびに呼び出す） |
+| A | `src/silo_rag/datagen.py` | 業界・職種を問わない社内プロジェクトのダミー振り返りレポート（部署ごとにハウススタイルが微妙に異なり、Markdown/Word/Excel/PowerPoint/PDFのいずれかにランダムに書き出す。成果画像も1枚合成して埋め込む）と評価用QAペアを生成 | `llm_model`（レポート本文生成） |
+| B | `src/silo_rag/ingest.py` | 5形式それぞれの読み取りロジックで見出し単位にチャンキングし、埋め込み画像をVLMでキャプション化してから、ローカル埋め込みモデルでベクトル化しChromaDBに格納 | `embed_model`（チャンクのベクトル化）／`vlm_model`（成果画像のキャプション化） |
+| C | `src/silo_rag/retrieval.py` | BM25（キーワード）＋ベクトル類似度のハイブリッド検索 → LLMによるリランキング | `embed_model`（クエリのベクトル化）／`llm_model`（リランキング） |
+| D | `src/silo_rag/generation.py` | 検索済みチャンクを根拠に、出典（レポートID・セクション・**部署**）付きの回答を生成 | `llm_model`（回答生成） |
+| E | `src/silo_rag/eval.py` | gold-standard QAペアに対する検索精度（Recall@k, MRR）と回答品質（簡易LLM-as-judge, 引用網羅率）を測定 | C・Dが使う全モデル＋`llm_model`（LLM-as-judge採点） |
+| F | `src/silo_rag/app.py` | Streamlitチャット UI（部署・プロジェクト種別での絞り込み、引用元の展開表示） | C・Dが使う全モデル（質問のたびに呼び出す） |
 
 `vlm_model`が未ロードの場合、Bの画像キャプション化だけがスキップされる（警告ログのみ）。他のノードは影響を受けない。
 

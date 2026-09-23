@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fem_rag.ingest import (
+from silo_rag.ingest import (
     RESULT_IMAGE_SECTION,
     _caption_image,
     _parse_pdf_text,
@@ -12,7 +12,7 @@ from fem_rag.ingest import (
     parse_frontmatter,
     split_into_sections,
 )
-from fem_rag.llm_client import LLMConnectionError
+from silo_rag.llm_client import LLMConnectionError
 
 SAMPLE_REPORT = """---
 report_id: RPT-001

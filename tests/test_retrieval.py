@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from fem_rag.ingest import Chunk
-from fem_rag.retrieval import (
+from silo_rag.ingest import Chunk
+from silo_rag.retrieval import (
     ScoredChunk,
     _build_where,
     _normalize_bm25,

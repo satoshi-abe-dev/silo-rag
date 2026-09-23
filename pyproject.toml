@@ -1,5 +1,5 @@
 # src レイアウトのパッケージを `pip install -e .` で解決できるようにする最小限の
-# build-system/project設定。`python -m fem_rag.xxx` をリポジトリ直下からそのまま
+# build-system/project設定。`python -m silo_rag.xxx` をリポジトリ直下からそのまま
 # 実行できるようにするための最小限の設定（`pythonpath` はpytest専用で他には効かない）。
 # 依存関係（本番用・開発用とも）はここが一次情報。別途requirements*.txtは置かない。
 [build-system]
@@ -7,7 +7,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "fem-rag"
+name = "silo-rag"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
