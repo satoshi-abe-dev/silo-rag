@@ -82,7 +82,7 @@ Even for cross-department questions, hit_rate is 1.00 (every question retrieved 
 
 ## Constraints and scope
 
-- Structural analysis (FEM) only — thermal analysis, CFD, etc. are out of scope
+- Structural analysis (FEM) only
 - Since the data is synthetic, the numbers and troubleshooting cases aren't drawn from real practice
 - No company names are used, real or fictional
 
