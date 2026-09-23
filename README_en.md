@@ -84,6 +84,7 @@ While `datagen` runs, you may see a "generation failed" warning — a small loca
 - Since the data is synthetic, the numbers and cases aren't drawn from real practice
 - No company names are used, real or fictional
 - Designed to be industry- and role-agnostic rather than tied to one specific domain
+- **The application itself (UI, generated data, LLM prompts) is Japanese-only.** It hasn't been localized to English — this README being bilingual is purely for portfolio readability, separate from the app's own language support. A half-translated UI (English labels next to Japanese dropdown values and answer text) was deliberately avoided
 
 > 💡 **If you just want to run it, this is all you need.** From here on it's the internals of the DAG and the development process (graph engineering + independent review).
 
