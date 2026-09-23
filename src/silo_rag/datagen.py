@@ -252,6 +252,11 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
 
 _MAX_GENERATION_ATTEMPTS = 3
 
+# レポート単位のリトライ（_MAX_GENERATION_ATTEMPTS）を使い切っても、1件がどうしても
+# 見出し構成を守れないことがある。ユーザーに手動で再実行させる代わりに、バッチ全体を
+# 自動的に最初からやり直す（温度付きサンプリングなので、やり直せば大抵は成功する）。
+_MAX_BATCH_ATTEMPTS = 3
+
 # 画像を必ず添付するセクション。全部署共通の見出しなので固定できる
 # （DEPT_TERMINOLOGYで語彙が揺れるのはbackground/approachのみ）。
 RESULT_IMAGE_SECTION = "成果サマリー"
@@ -270,6 +275,16 @@ def _generate_result_image(spec: ReportSpec) -> bytes:
     matplotlib.use("Agg")  # ヘッドレス環境向け（GUIバックエンドを使わない）
     import matplotlib.pyplot as plt
     import numpy as np
+
+    # 既定フォント（DejaVu Sans）は日本語グリフを持たず、ラベルが文字化けする
+    # （豆腐表示＋UserWarning）。主要OSに入っている日本語対応フォントを優先させ、
+    # どれも無い環境ではDejaVu Sansにフォールバックする。
+    plt.rcParams["font.sans-serif"] = [
+        "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo",
+        "Noto Sans CJK JP", "IPAexGothic", "DejaVu Sans",
+    ]
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["axes.unicode_minus"] = False
 
     rng = np.random.default_rng(abs(hash(spec.report_id)) % (2**32))
     fig, ax = plt.subplots(figsize=(5, 3.5), dpi=100)
@@ -642,7 +657,24 @@ def main() -> None:
             raise SystemExit(
                 f"LM Studio ({config.ai.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
-        generate_reports(client, specs, args.out_dir)
+        last_error: LLMConnectionError | None = None
+        for attempt in range(1, _MAX_BATCH_ATTEMPTS + 1):
+            try:
+                generate_reports(client, specs, args.out_dir)
+                break
+            except LLMConnectionError as exc:
+                last_error = exc
+                print(
+                    f"バッチ全体の生成に失敗しました（{attempt}/{_MAX_BATCH_ATTEMPTS}回目）: {exc}\n"
+                    "ローカルLLMのサンプリングのブレによる一時的な失敗のことが多いため、"
+                    "自動的に最初からやり直します。"
+                )
+        else:
+            assert last_error is not None
+            raise SystemExit(
+                f"{_MAX_BATCH_ATTEMPTS}回試しましたが生成に失敗しました: {last_error}\n"
+                "ロードしているモデルを変えるか、しばらく時間を置いて再実行してください。"
+            )
 
     qa_pairs = generate_eval_qa(specs, args.eval_count, seed=args.seed)
     _write_eval_qa(qa_pairs, args.eval_out_dir)
