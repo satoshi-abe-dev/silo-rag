@@ -35,7 +35,11 @@ This project demonstrates a value proposition: **as long as documents are kept i
 - A local LLM server speaking an OpenAI-compatible API, such as [LM Studio](https://lmstudio.ai/)
   - Load three kinds of models: a chat model, an embedding model, and a **vision model (VLM) for image captioning** (e.g., something in the Qwen2.5-VL / Qwen3-VL family)
   - Everything else works even without the VLM loaded — only image captioning is skipped, with a warning
-  - Connects to `http://localhost:1234/v1` by default
+  - Connects to `http://localhost:1234/v1` by default — that's LM Studio's default port
+  - To use a different OpenAI-compatible server (e.g. Ollama), change `[ai] base_url`
+    in `config.toml` (Ollama's default is `http://localhost:11434/v1`), or override it
+    with the `SILORAG_AI_BASE_URL` environment variable (priority: env var >
+    `config.toml` > the code's built-in default)
 
 ### Install
 
