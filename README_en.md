@@ -63,7 +63,14 @@ Adjust LM Studio's base URL and model names in `config.toml` (these can also be 
 
 ## Usage
 
-Run the following in order (see [Architecture](#architecture-dag) below for how each step is designed internally).
+The prep work before launching the UI (generate synthetic data → ingest → evaluate) can be run in one command.
+
+```bash
+bash scripts/prepare_demo_data.sh
+```
+
+It just runs the following in order, so run them directly if you want to redo a single step
+(see [Architecture](#architecture-dag) below for how each step is designed internally).
 
 ```bash
 # Generate synthetic data (60 reports + 15 evaluation QA pairs by default)
