@@ -188,6 +188,10 @@ The only independent pair is C and D (retrieval and generation) — both depend 
 
 Acyclic (no loops) just guarantees a valid build order exists at all; it's a separate claim from independence. Even a fully acyclic graph offers zero parallelism if it's one straight chain (A→B→C→D→E→F). The parallel-implementation payoff here came from the graph's actual shape — no arrow happens to connect C and D.
 
+> ⚠️ **"Parallel" here means parallel development (writing the code), not parallel execution at runtime.**
+> The DAG's arrows show which module depends on which; they are not the runtime order of operations.
+> At runtime, each question runs C (retrieval) then D (generation) sequentially — D takes the chunks C returned as its input, handed over by E/F. Because C and D don't depend on each other, two Agents **could write them at the same time**; that is all the claim means.
+
 ## Development process (graph engineering + independent review)
 
 The development process itself was also a design target. The requirement to "bring graph engineering into the development process" (see 🧭 above) was concretized by AI as follows.
