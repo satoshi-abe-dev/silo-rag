@@ -112,6 +112,20 @@ are hardcoded to the demo's fixed vocabulary (`DEPARTMENTS` / `PROJECT_TYPES` in
 `datagen.py`), so they may not match your own data's categories (cross-department search
 itself still works fine without using the filters).
 
+### Using the agent version (optional)
+
+Besides the plain search (search once, then answer), there's a LangGraph agent that rewrites the query and searches again when
+the results look insufficient (design and evaluation: [Node G](#node-g-the-langgraph-agent)). LangGraph is an optional
+dependency; everything in the plain mode works without it.
+
+```bash
+pip install -e ".[agent]"
+```
+
+- **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (search, grade, rewrite) appears under each answer.
+- **Evaluation**: `python -m silo_rag.eval --pipeline agent` (grading strictness via `--grade-mode strict|lenient`). To compare against plain mode, `bash scripts/compare_pipelines.sh <model name>` runs all three variants and prints a comparison table.
+- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`).
+
 ### Launching the UI
 
 Either way you prepared the data, launch the UI last (not included in either path above —
@@ -145,6 +159,10 @@ graph LR
     C --> E[eval: retrieval accuracy + answer quality evaluation]
     D --> E
     E --> F[app: Streamlit UI]
+    C -.-> G[agent: LangGraph agent, optional]
+    D -.-> G
+    G -.-> E
+    G -.-> F
 ```
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
@@ -155,6 +173,7 @@ graph LR
 | D | `src/silo_rag/generation.py` | - Generates answers grounded in retrieved chunks<br>- Attaches citations (report ID, section, **department**)<br>- Resolves references using conversation history | `llm_model` (answer generation) |
 | E | `src/silo_rag/eval.py` | - Measures retrieval accuracy (Recall@k, MRR)<br>- Measures answer quality (LLM-as-judge, citation coverage) | - Every model used by C and D<br>- `llm_model` (LLM-as-judge scoring) |
 | F | `src/silo_rag/app.py` | - Streamlit chat UI<br>- Filter by department/type, citation display | Every model used by C and D (invoked on every question) |
+| G (optional) | `src/silo_rag/agent.py` | - Runs a "search → grade → rewrite → search again" loop with LangGraph<br>- Details: [Node G](#node-g-the-langgraph-agent) | Every model used by C and D |
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 
@@ -174,6 +193,7 @@ only `answer_question()`.
 - **A → B**: connected through files (`data/synth_reports/`). Zero import coupling.
 - **B → C/D**: connected through ChromaDB. C and D import only the `Chunk` type (`from .ingest import Chunk`), not B's processing functions.
 - **C/D → E/F**: ordinary function calls — `eval.py` and `app.py` call `search()` / `answer_question()` directly.
+- **C/D → G → E/F**: G likewise only calls `search()` / `answer_question()` (and `rerank()`). E and F can switch between plain mode and G.
 
 The stronger the dependency, the tighter the coupling (direct calls for the last, loose coupling for the first two).
 
@@ -200,6 +220,64 @@ What graph engineering — designing the pipeline as a DAG and making dependenci
 - **Reusable module separation**: since each node is independent, rewriting or redoing just one of them later doesn't touch the others. In practice, follow-up changes like adjusting the system prompts, updating the test vocabulary, or revising the README have each been split across parallel Agents as independent tasks too.
 
 Deciding a build order isn't a benefit unique to graph engineering. What pays off is what making the dependencies explicit as a graph reveals: "the part that can be parallelized (C/D)" and "boundaries narrow enough to review in isolation."
+
+## Node G: the LangGraph agent
+
+A new node (`src/silo_rag/agent.py`) that **only calls the public functions** of node C (retrieval) and node D (generation). It doesn't touch the
+insides of C or D, and C and D stay independent of each other (only G knows both — the same shape as E, which calls both), so **the module dependency
+graph is still a DAG**. The loop lives only inside this one node, as part of the runtime flow.
+
+```mermaid
+graph TD
+    S((START)) --> R[retrieve: call search]
+    R --> J[grade: is the evidence sufficient?]
+    J -->|sufficient, or attempt cap reached| SEL[select: only after multiple searches, rerank everything collected against the original question]
+    J -->|insufficient, under the cap| W[rewrite: write a query from a different angle]
+    W -->|new query| R
+    W -->|rewrite failed| SEL
+    SEL --> G[generate: call answer_question]
+    G --> X((END))
+```
+
+The LLM decides "is the evidence sufficient?" and "what query to try next"; the code decides "how many times at most" via
+`[agent] max_attempts` in `config.toml` (3 by default).
+
+### Design decisions
+
+- **LangGraph used directly, not LangChain's `create_agent`.** `create_agent` builds a fixed loop in which the LLM calls tools, and it presupposes the LLM's tool calling (function calling). Tool calling is often unreliable on ~7B local models (not verified here), so I built a graph of my own shape — search → grade → rewrite — directly in LangGraph.
+- **The LLM only answers in fixed formats.** Grading is the single word `SUFFICIENT` / `INSUFFICIENT`; rewriting is a single query line. The code parses them strictly (no substring matching). In the manual runs against a 7B model (4 questions, twice), every grading and rewriting response came back in the expected format.
+- **Auxiliary decisions never stop the run.** If grading or rewriting hits an LLM connection error, malformed output, or a repeated query, it moves on to generation with the chunks in hand. A failure in generation itself still propagates to the caller as before.
+- **The zero-external-transmission policy is unchanged.** Every LLM call goes through the existing `LLMClient` (local LM Studio, etc.). LangGraph sends nothing externally unless you set LangSmith environment variables (`LANGSMITH_TRACING`, etc.).
+- **Grading strictness has two levels (`strict` / `lenient`).** The grading LLM can't know whether a better document exists that it hasn't seen yet, so which level is better isn't settled by prompt wording alone. `strict` retried up to the cap on most questions (8 of 9 gradings said "insufficient"); `lenient` says "sufficient" quickly. I kept both and compared them in the evaluation.
+
+### Evaluation: comparison with plain mode
+
+The same evaluation set (15 questions, 5 of them cross-department) was run through plain mode and the agent (`strict` / `lenient`), once each.
+
+| Answer model | Mode | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | Searches | LLM calls | Sec/question |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 7B | plain | 0.60 | 0.40 | 0.70 | 0.49 | 0.60 | 3.67 | 1.0 | 2.0 | 10.8 |
+| 7B | agent strict | **0.73** | 0.40 | **0.90** | 0.61 | 0.60 | 3.73 | 1.9 | 6.4 | 17.8 |
+| 7B | agent lenient | 0.67 | 0.40 | 0.80 | 0.54 | 0.60 | 3.80 | 1.4 | 4.5 | 14.6 |
+| 32B | plain | **0.87** | 1.00 | 0.80 | 0.71 | 0.87 | 3.60 | 1.0 | 2.0 | 50.4 |
+| 32B | agent strict | 0.87 | 1.00 | 0.80 | 0.72 | 0.80 | 3.33 | 2.5 | 8.2 | 88.9 |
+| 32B | agent lenient | 0.87 | 1.00 | 0.80 | 0.74 | 0.73 | 3.27 | 1.1 | 3.5 | 55.8 |
+
+7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit).
+LLM calls are the chat calls up to the answer (embeddings and judge scoring excluded).
+The judge uses the same model as the answerer, so **judge scores are only comparable between rows of the same model**.
+
+- **The smaller the model, the more it helps.** With 7B, `strict` raised hit_rate from 0.60 to 0.73 (9 → 11 of 15 questions). The gain was on same-department questions (0.70 → 0.90). The 7B agent (17.8 s) closes about half the gap to 32B plain mode (50.4 s) in roughly a third of the time.
+- **It doesn't help a large-enough model.** With 32B, all three modes hit 13 of 15 questions — the same questions found, the same 2 missed. Plain mode was already strong, so there was nothing left to improve; `strict` cost about 1.8× the time and 4× the LLM calls. Citation rate and judge dipped slightly (retries may mix in other reports that generation doesn't separate well, but 15 questions can't establish that).
+- **Cross-department questions stayed at 0.40 with 7B.** All the gains came from same-department questions.
+- **Conclusion: plain mode stays the default.** The agent is positioned as an option for when you have to use a small model, trading time for accuracy.
+
+> ⚠️ **This is 15 questions, one run per mode; a one-question difference (0.07) can't be called a real difference,** and LLM output varies between runs. Read it as a trend. I also tried Gemma 4 26B (MoE, a thinking model), but thinking inflated the output tokens to about 174 s per question, so I cut it off midway and left it out of the comparison.
+
+### Problems found along the way
+
+- **Three findings from the independent review (codex):** (1) CI didn't install the optional dependency, so the new tests couldn't be collected; (2) a retry returning `top_k` chunks pushed out all earlier evidence; (3) the grading prompt had no conversation history, so follow-up questions couldn't be graded. Each was reproduced with a mock, fixed, and given a regression test.
+- **Three findings from running it against a real LLM (7B):** (1) grading was so strict it retried up to the cap every time; (2) rewritten queries included the asker's own department, biasing search toward it; (3) interleaving the retries' results pushed out a gold report the original query had found (fixed by the `select` node, which reranks everything collected against the original question). Mock-based tests alone didn't surface these.
 
 ## License
 
