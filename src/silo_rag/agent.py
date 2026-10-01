@@ -7,9 +7,12 @@ retrieval.pyの`search()`（ノードC）とgeneration.pyの`answer_question()`�
 
 実行時のグラフ:
 
-    START → retrieve → grade ─(十分、または不十分でも上限到達)→ generate → END
-               ↑         └─(不十分・上限未満)→ rewrite ─(書き直し失敗)→ generate
+    START → retrieve → grade ─(十分、または不十分でも上限到達)→ select → generate → END
+               ↑         └─(不十分・上限未満)→ rewrite ─(書き直し失敗)→ select
                └──────────(新しいクエリ)──────────┘
+
+selectは、複数回検索した場合だけ、集めた候補全体を元の質問でLLMに並べ直させる
+（retrieval.rerank()。1回だけならsearch()内で並べ直し済みなので何もしない）。
 
 「根拠が十分か」「次にどんなクエリで探すか」はLLMが判断し、「何回まで繰り返すか」は
 config.agent.max_attemptsでコードが決める。
@@ -37,7 +40,7 @@ from langgraph.graph import END, START, StateGraph
 from .config import load_config
 from .generation import Answer, answer_question
 from .llm_client import LLMClient, LLMConnectionError
-from .retrieval import ScoredChunk, search
+from .retrieval import ScoredChunk, rerank, search
 
 # 判定プロンプトに載せるチャンク本文の最大文字数（判定には要点が分かれば足りる）。
 _GRADE_CHUNK_TRUNCATE = 300
@@ -117,7 +120,9 @@ _GRADE_SYSTEM_PROMPT = (
     "あなたは社内ナレッジ検索の検索結果を点検する係です。"
     "質問と検索で見つかった資料の抜粋を読み、質問に答えるための根拠が資料に含まれているかを判定してください。"
     "会話履歴が付いている場合は、質問中の指示語（「それ」「さっきの」等）が何を指すかの解決にだけ使ってください。"
-    "根拠が含まれていれば SUFFICIENT、含まれていなければ INSUFFICIENT と答えてください。"
+    "資料は、質問と全く同じ案件・部署・プロジェクト種別である必要はありません。"
+    "テーマや失敗パターンが似ていて参考になる事例（他部署の事例を含む）が1件でも含まれていれば SUFFICIENT、"
+    "参考になる事例が1件も無ければ INSUFFICIENT と答えてください。"
     "出力は SUFFICIENT か INSUFFICIENT のどちらか1語のみとし、説明は一切含めないでください。"
 )
 
@@ -164,6 +169,9 @@ _REWRITE_SYSTEM_PROMPT = (
     "これまでのクエリでは質問に答える根拠が見つかりませんでした。"
     "これまでと違う切り口（言い換え・上位概念・関連する失敗パターン・他部署で使われそうな用語など）で、"
     "新しい検索クエリを1文だけ作ってください。"
+    "質問者が自分の所属部署を名乗っていても、その部署名はクエリに含めないでください"
+    "（探したいのは他部署を含む全部署の事例であり、部署名を入れると質問者の部署の資料に検索が偏るため）。"
+    "テーマ・施策の種類・失敗パターンなど、事例の中身を表す言葉で探してください。"
     "出力は検索クエリの文のみとし、説明や前置き・引用符は一切含めないでください。"
 )
 
@@ -192,6 +200,17 @@ def _parse_rewrite_response(raw: str) -> str | None:
 
 def _normalize_query(query: str) -> str:
     return "".join(query.split()).lower()
+
+
+def _build_rerank_query(question: str, history: list[tuple[str, str]] | None) -> str:
+    """最終選定の並べ直しに使うクエリ。
+
+    retrieval.rerank()は質問文を1つしか受け取れないため、フォローアップ質問（「その費用は？」等）
+    では直前の質問を添えて、何についての質問かが分かるようにする。
+    """
+    if not history:
+        return question
+    return f"{history[-1][0]}（に続けて）{question}"
 
 
 # --- グラフ ---------------------------------------------------------------------
@@ -247,11 +266,11 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
         label = "十分" if verdict == "sufficient" else "不十分"
         return {"verdict": verdict, "trace": [*state["trace"], f"判定: {label}"]}
 
-    def route_after_grade(state: AgentState) -> Literal["rewrite", "generate"]:
+    def route_after_grade(state: AgentState) -> Literal["rewrite", "select"]:
         if state["verdict"] == "sufficient":
-            return "generate"
+            return "select"
         if state["attempts"] >= max_attempts:
-            return "generate"
+            return "select"
         return "rewrite"
 
     def rewrite(state: AgentState) -> dict:
@@ -271,8 +290,24 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
             }
         return {"next_query": query, "trace": [*state["trace"], f"書き直し: 「{query}」"]}
 
-    def route_after_rewrite(state: AgentState) -> Literal["retrieve", "generate"]:
-        return "retrieve" if state["next_query"] else "generate"
+    def route_after_rewrite(state: AgentState) -> Literal["retrieve", "select"]:
+        return "retrieve" if state["next_query"] else "select"
+
+    def select(state: AgentState) -> dict:
+        # 1回しか検索していなければ、search()内ですでに質問で並べ直し済み。
+        if state["attempts"] <= 1:
+            return {}
+        # 複数回検索した場合、_merge_chunksの交互の並びのままtop_kで切ると、回数が増えるほど
+        # 各回の上位しか残らず、元の質問での検索（たいてい最も信頼できる）の2位以下が押し出される
+        # （実データで、baselineでは拾えていた正解がこれで落ちた）。集めた候補全体を元の質問で
+        # 並べ直してから、generateでtop_k件に絞る。
+        query = _build_rerank_query(state["question"], state["history"])
+        candidates = state["scored_chunks"]
+        reranked = rerank(client, query, candidates)
+        return {
+            "scored_chunks": reranked,
+            "trace": [*state["trace"], f"最終選定: 集めた{len(candidates)}件を元の質問で並べ直し"],
+        }
 
     def generate(state: AgentState) -> dict:
         chunks = [sc.chunk for sc in state["scored_chunks"][:top_k]]
@@ -283,13 +318,13 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
     graph.add_node("retrieve", retrieve)
     graph.add_node("grade", grade)
     graph.add_node("rewrite", rewrite)
+    graph.add_node("select", select)
     graph.add_node("generate", generate)
     graph.add_edge(START, "retrieve")
     graph.add_edge("retrieve", "grade")
-    graph.add_conditional_edges("grade", route_after_grade, {"rewrite": "rewrite", "generate": "generate"})
-    graph.add_conditional_edges(
-        "rewrite", route_after_rewrite, {"retrieve": "retrieve", "generate": "generate"}
-    )
+    graph.add_conditional_edges("grade", route_after_grade, {"rewrite": "rewrite", "select": "select"})
+    graph.add_conditional_edges("rewrite", route_after_rewrite, {"retrieve": "retrieve", "select": "select"})
+    graph.add_edge("select", "generate")
     graph.add_edge("generate", END)
     return graph.compile()
 
@@ -327,8 +362,9 @@ def run_agent(
         "answer": None,
         "trace": [],
     }
-    # 1周（retrieve→grade→rewrite）で3ステップ。max_attemptsでループは必ず止まるが、
-    # 万一の無限ループに備えてLangGraph側のステップ上限も、必要数ぎりぎりで掛けておく。
+    # 最大ステップ数は retrieve・grade が各max_attempts回、rewriteがmax_attempts-1回、select・generateが
+    # 各1回で 3*max_attempts+1。max_attemptsでループは必ず止まるが、万一の無限ループに備えて
+    # LangGraph側のステップ上限も、必要数ぎりぎりで掛けておく。
     final = app.invoke(initial, config={"recursion_limit": 3 * resolved_max + 2})
     return AgentResult(
         answer=final["answer"],

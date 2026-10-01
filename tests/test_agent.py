@@ -12,6 +12,7 @@ import silo_rag.agent as agent_module
 from silo_rag.agent import (
     _GRADE_SYSTEM_PROMPT,
     _REWRITE_SYSTEM_PROMPT,
+    _build_rerank_query,
     _merge_chunks,
     _parse_grade_response,
     _parse_rewrite_response,
@@ -67,6 +68,9 @@ def fake_pipeline(monkeypatch):
         def __init__(self):
             self.results: list[list[ScoredChunk]] = []
             self.search_calls: list[dict] = []
+            self.rerank_calls: list[dict] = []
+            # rerank()の並べ替え方。既定は入力の順序のまま返す。
+            self.rerank_order = lambda candidates: list(candidates)
             self.generated_with: list[str] | None = None
 
     rec = _Recorder()
@@ -79,7 +83,12 @@ def fake_pipeline(monkeypatch):
         rec.generated_with = [c.chunk_id for c in chunks]
         return Answer(text="回答", citations=[])
 
+    def fake_rerank(client, query, candidates):
+        rec.rerank_calls.append({"query": query, "ids": [sc.chunk.chunk_id for sc in candidates]})
+        return rec.rerank_order(candidates)
+
     monkeypatch.setattr(agent_module, "search", fake_search)
+    monkeypatch.setattr(agent_module, "rerank", fake_rerank)
     monkeypatch.setattr(agent_module, "answer_question", fake_answer_question)
     return rec
 
@@ -246,6 +255,41 @@ def test_grade_prompt_without_history_has_no_history_block(fake_pipeline):
     run_agent(client, "質問", top_k=5, max_attempts=3)
 
     assert "会話履歴" not in client.grade_prompts[0]
+
+
+def test_single_search_skips_final_rerank(fake_pipeline):
+    # 1回だけならsearch()内で並べ直し済みなので、最終選定でLLMを呼ばない。
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"])
+
+    run_agent(client, "質問", top_k=5, max_attempts=3)
+
+    assert fake_pipeline.rerank_calls == []
+
+
+def test_final_rerank_sees_all_collected_chunks_and_decides_order(fake_pipeline):
+    # 交互の並びのままtop_kで切ると落ちる「1回目の2位」も、最終選定の候補には入ること
+    # （実データでbaselineの正解がこれで落ちたケース）。
+    fake_pipeline.results = [[_sc("a1"), _sc("a2")], [_sc("b1"), _sc("b2")], [_sc("c1"), _sc("c2")]]
+    fake_pipeline.rerank_order = lambda cands: sorted(cands, key=lambda sc: sc.chunk.chunk_id != "a2")
+    client = _ScriptedAgentClient(grades=["INSUFFICIENT"] * 3, rewrites=["クエリ2", "クエリ3"])
+
+    result = run_agent(client, "元の質問", top_k=2, max_attempts=3)
+
+    (call,) = fake_pipeline.rerank_calls
+    assert call["query"] == "元の質問"
+    assert sorted(call["ids"]) == ["a1", "a2", "b1", "b2", "c1", "c2"]
+    assert fake_pipeline.generated_with[0] == "a2"
+    assert result.scored_chunks[0].chunk.chunk_id == "a2"
+    assert any("最終選定" in t for t in result.trace)
+
+
+def test_build_rerank_query_adds_previous_question_for_follow_up():
+    assert _build_rerank_query("質問", None) == "質問"
+    query = _build_rerank_query("その費用は？", [("古い質問", "回答"), ("新商品の失敗事例は？", "回答")])
+    assert "新商品の失敗事例は？" in query
+    assert "その費用は？" in query
+    assert "古い質問" not in query
 
 
 def test_top_k_limits_chunks_passed_to_generation(fake_pipeline):
