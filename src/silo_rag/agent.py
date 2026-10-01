@@ -50,7 +50,8 @@ class AgentState(TypedDict):
     history: list[tuple[str, str]] | None
     filters: dict[str, str] | None
     tried_queries: list[str]  # 同じクエリでの再検索を防ぐ
-    scored_chunks: list[ScoredChunk]  # 各回の検索結果を、優先順に並べて蓄積したもの
+    results_by_attempt: list[list[ScoredChunk]]  # 各回の検索結果（新しい回が先頭）
+    scored_chunks: list[ScoredChunk]  # results_by_attemptを_merge_chunksで1列に並べたもの
     attempts: int
     verdict: Literal["sufficient", "insufficient"] | None
     next_query: str | None
@@ -70,21 +71,44 @@ class AgentResult:
 # --- 検索結果の蓄積 -------------------------------------------------------------
 
 
-def _merge_chunks(previous: list[ScoredChunk], latest: list[ScoredChunk]) -> list[ScoredChunk]:
-    """最新の検索結果を先頭に、それまでの結果のうち未出のチャンクを後ろに並べる。
+def _merge_chunks(results_by_attempt: list[list[ScoredChunk]]) -> list[ScoredChunk]:
+    """各回の検索結果を、順位ごとに交互に並べて1列にする（重複は先に出た方だけ残す）。
 
-    再検索するのは「前回までの結果では不十分」と判定されたときだけなので、最新の結果を優先する。
+    results_by_attemptは新しい回が先頭。各回の1位→各回の2位→…の順に並べ、同じ順位の中では
+    新しい回を優先する（再検索するのは「前回までの結果では不十分」と判定されたときだけのため）。
+
+    最新の結果を単純に先頭へ積むと、最新の回がtop_k件を返した時点で前回までの根拠がすべて
+    押し出され、複数回の検索で補い合う根拠を蓄積できない（codexレビューで指摘され、修正した）。
+    交互に並べれば、どの回の上位の根拠も残る。
     スコアで混ぜないのは、retrieval.search()のスコアがクエリごとに正規化されていて、
     別クエリの結果同士では比較できないため（最終順位もLLMリランキングで決まっている）。
     """
     merged: list[ScoredChunk] = []
     seen: set[str] = set()
-    for sc in [*latest, *previous]:
-        if sc.chunk.chunk_id in seen:
-            continue
-        seen.add(sc.chunk.chunk_id)
-        merged.append(sc)
+    longest = max((len(r) for r in results_by_attempt), default=0)
+    for rank in range(longest):
+        for results in results_by_attempt:
+            if rank >= len(results):
+                continue
+            sc = results[rank]
+            if sc.chunk.chunk_id in seen:
+                continue
+            seen.add(sc.chunk.chunk_id)
+            merged.append(sc)
     return merged
+
+
+def _build_history_lines(history: list[tuple[str, str]] | None) -> list[str]:
+    """会話履歴を、プロンプトに埋め込む行のリストにする（直近の数往復だけ。履歴が無ければ空）。"""
+    if not history:
+        return []
+    lines = ["会話履歴（指示語の解決にのみ使う）:"]
+    for q, a in history[-_MAX_HISTORY_TURNS:]:
+        truncated = a if len(a) <= _HISTORY_ANSWER_TRUNCATE else a[:_HISTORY_ANSWER_TRUNCATE] + "…"
+        lines.append(f"Q: {q}")
+        lines.append(f"A: {truncated}")
+    lines.append("")
+    return lines
 
 
 # --- 判定（根拠は十分か） ---------------------------------------------------------
@@ -92,13 +116,18 @@ def _merge_chunks(previous: list[ScoredChunk], latest: list[ScoredChunk]) -> lis
 _GRADE_SYSTEM_PROMPT = (
     "あなたは社内ナレッジ検索の検索結果を点検する係です。"
     "質問と検索で見つかった資料の抜粋を読み、質問に答えるための根拠が資料に含まれているかを判定してください。"
+    "会話履歴が付いている場合は、質問中の指示語（「それ」「さっきの」等）が何を指すかの解決にだけ使ってください。"
     "根拠が含まれていれば SUFFICIENT、含まれていなければ INSUFFICIENT と答えてください。"
     "出力は SUFFICIENT か INSUFFICIENT のどちらか1語のみとし、説明は一切含めないでください。"
 )
 
 
-def _build_grade_prompt(question: str, chunks: list[ScoredChunk]) -> str:
-    lines = [f"質問: {question}", "", "検索で見つかった資料の抜粋:"]
+def _build_grade_prompt(
+    question: str, chunks: list[ScoredChunk], history: list[tuple[str, str]] | None = None
+) -> str:
+    # フォローアップ質問（「その費用は？」等）は、履歴が無いと何についての質問か判定できない
+    # （codexレビューで指摘され、修正した。検索・書き直し・回答生成と同じく履歴を渡す）。
+    lines = [*_build_history_lines(history), f"質問: {question}", "", "検索で見つかった資料の抜粋:"]
     for i, sc in enumerate(chunks, start=1):
         meta = sc.chunk.metadata
         text = sc.chunk.text
@@ -142,14 +171,7 @@ _REWRITE_SYSTEM_PROMPT = (
 def _build_rewrite_prompt(
     question: str, tried_queries: list[str], history: list[tuple[str, str]] | None
 ) -> str:
-    lines: list[str] = []
-    if history:
-        lines.append("会話履歴（指示語の解決にのみ使う）:")
-        for q, a in history[-_MAX_HISTORY_TURNS:]:
-            truncated = a if len(a) <= _HISTORY_ANSWER_TRUNCATE else a[:_HISTORY_ANSWER_TRUNCATE] + "…"
-            lines.append(f"Q: {q}")
-            lines.append(f"A: {truncated}")
-        lines.append("")
+    lines = _build_history_lines(history)
     lines.append(f"質問: {question}")
     lines.append("")
     lines.append("これまでに試したクエリ:")
@@ -192,11 +214,12 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
             # 2回目以降のクエリはrewriteノードで履歴も踏まえて作っているので、historyは渡さない。
             query = state["next_query"] or state["question"]
             latest = search(client, query, top_k=top_k, filters=state["filters"])
-        merged = _merge_chunks(state["scored_chunks"], latest)
+        results_by_attempt = [latest, *state["results_by_attempt"]]
         return {
             "attempts": attempts,
             "tried_queries": [*state["tried_queries"], query],
-            "scored_chunks": merged,
+            "results_by_attempt": results_by_attempt,
+            "scored_chunks": _merge_chunks(results_by_attempt),
             "next_query": None,
             "trace": [*state["trace"], f"検索{attempts}回目「{query}」→ {len(latest)}件"],
         }
@@ -206,7 +229,7 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
         if not chunks:
             # 判定するまでもなく根拠が無い。LLMを呼ばずに「不十分」とする。
             return {"verdict": "insufficient", "trace": [*state["trace"], "判定: 不十分（検索結果0件）"]}
-        prompt = _build_grade_prompt(state["question"], chunks)
+        prompt = _build_grade_prompt(state["question"], chunks, state["history"])
         try:
             raw = client.chat(_GRADE_SYSTEM_PROMPT, prompt, temperature=0.0)
         except LLMConnectionError:
@@ -296,6 +319,7 @@ def run_agent(
         "history": history,
         "filters": filters,
         "tried_queries": [],
+        "results_by_attempt": [],
         "scored_chunks": [],
         "attempts": 0,
         "verdict": None,

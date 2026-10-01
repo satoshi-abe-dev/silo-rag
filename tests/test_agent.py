@@ -39,10 +39,12 @@ class _ScriptedAgentClient:
         self.rewrites = list(rewrites or [])
         self.grade_calls = 0
         self.rewrite_calls = 0
+        self.grade_prompts: list[str] = []
 
     def chat(self, system: str, user: str, **kwargs) -> str:
         if system == _GRADE_SYSTEM_PROMPT:
             self.grade_calls += 1
+            self.grade_prompts.append(user)
             item = self.grades.pop(0)
         elif system == _REWRITE_SYSTEM_PROMPT:
             self.rewrite_calls += 1
@@ -212,6 +214,40 @@ def test_history_and_filters_are_passed_correctly(fake_pipeline):
     assert first["filters"] == second["filters"] == filters
 
 
+def test_retry_keeps_earlier_evidence_when_latest_fills_top_k(fake_pipeline):
+    # 再検索がtop_k件ちょうどを返しても、前回の上位の根拠が押し出されないこと
+    # （codexレビューで指摘されたケース）。
+    fake_pipeline.results = [[_sc("first-a"), _sc("first-b")], [_sc("second-a"), _sc("second-b")]]
+    client = _ScriptedAgentClient(grades=["INSUFFICIENT", "SUFFICIENT"], rewrites=["別のクエリ"])
+
+    run_agent(client, "質問", top_k=2, max_attempts=2)
+
+    assert fake_pipeline.generated_with == ["second-a", "first-a"]
+    # 2回目の判定にも、前回の根拠が含まれている。
+    assert "first-a" in client.grade_prompts[1]
+
+
+def test_grade_prompt_includes_history_for_follow_up_question(fake_pipeline):
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"])
+    history = [("新商品ローンチキャンペーンの失敗事例は？", "RPT-001が参考になります。")]
+
+    run_agent(client, "その費用は？", history=history, top_k=5, max_attempts=3)
+
+    prompt = client.grade_prompts[0]
+    assert "Q: 新商品ローンチキャンペーンの失敗事例は？" in prompt
+    assert "質問: その費用は？" in prompt
+
+
+def test_grade_prompt_without_history_has_no_history_block(fake_pipeline):
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"])
+
+    run_agent(client, "質問", top_k=5, max_attempts=3)
+
+    assert "会話履歴" not in client.grade_prompts[0]
+
+
 def test_top_k_limits_chunks_passed_to_generation(fake_pipeline):
     fake_pipeline.results = [[_sc("a"), _sc("b"), _sc("c")]]
     client = _ScriptedAgentClient(grades=["SUFFICIENT"])
@@ -225,9 +261,21 @@ def test_top_k_limits_chunks_passed_to_generation(fake_pipeline):
 # --- 純粋関数 --------------------------------------------------------------------
 
 
-def test_merge_chunks_prioritizes_latest_and_dedups():
-    merged = _merge_chunks([_sc("a"), _sc("b")], [_sc("c"), _sc("a")])
+def test_merge_chunks_interleaves_by_rank_latest_first():
+    # 新しい回が先頭。各回の1位→各回の2位→…の順に並ぶ。
+    merged = _merge_chunks([[_sc("c"), _sc("d")], [_sc("a"), _sc("b")]])
+    assert [sc.chunk.chunk_id for sc in merged] == ["c", "a", "d", "b"]
+
+
+def test_merge_chunks_dedups_keeping_first_occurrence():
+    merged = _merge_chunks([[_sc("c"), _sc("a")], [_sc("a"), _sc("b")]])
     assert [sc.chunk.chunk_id for sc in merged] == ["c", "a", "b"]
+
+
+def test_merge_chunks_handles_uneven_and_empty_results():
+    merged = _merge_chunks([[], [_sc("a"), _sc("b"), _sc("c")], [_sc("x")]])
+    assert [sc.chunk.chunk_id for sc in merged] == ["a", "x", "b", "c"]
+    assert _merge_chunks([]) == []
 
 
 @pytest.mark.parametrize(
