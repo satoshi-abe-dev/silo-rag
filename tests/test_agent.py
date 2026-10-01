@@ -10,7 +10,7 @@ import pytest
 
 import silo_rag.agent as agent_module
 from silo_rag.agent import (
-    _GRADE_SYSTEM_PROMPT,
+    _GRADE_SYSTEM_PROMPTS,
     _REWRITE_SYSTEM_PROMPT,
     _build_rerank_query,
     _merge_chunks,
@@ -43,7 +43,7 @@ class _ScriptedAgentClient:
         self.grade_prompts: list[str] = []
 
     def chat(self, system: str, user: str, **kwargs) -> str:
-        if system == _GRADE_SYSTEM_PROMPT:
+        if system in _GRADE_SYSTEM_PROMPTS.values():
             self.grade_calls += 1
             self.grade_prompts.append(user)
             item = self.grades.pop(0)
@@ -350,3 +350,23 @@ def test_parse_grade_response(raw, expected):
 )
 def test_parse_rewrite_response(raw, expected):
     assert _parse_rewrite_response(raw) == expected
+
+
+@pytest.mark.parametrize("mode", ["strict", "lenient"])
+def test_grade_mode_selects_system_prompt(fake_pipeline, mode):
+    fake_pipeline.results = [[_sc("a")]]
+    seen: list[str] = []
+
+    class _Client(_ScriptedAgentClient):
+        def chat(self, system, user, **kwargs):
+            seen.append(system)
+            return super().chat(system, user, **kwargs)
+
+    run_agent(_Client(grades=["SUFFICIENT"]), "質問", top_k=5, max_attempts=3, grade_mode=mode)
+
+    assert seen == [_GRADE_SYSTEM_PROMPTS[mode]]
+
+
+def test_unknown_grade_mode_raises(fake_pipeline):
+    with pytest.raises(ValueError):
+        run_agent(_ScriptedAgentClient(), "質問", top_k=5, max_attempts=3, grade_mode="medium")

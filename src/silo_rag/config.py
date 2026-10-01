@@ -84,6 +84,8 @@ class AgentConfig:
     # LangGraphエージェント（agent.py）が検索を繰り返す上限回数（初回の検索を含む）。
     # 「根拠が十分か」はLLMが判定するが、何回まで繰り返すかはここでコードが決める。
     max_attempts: int = 3
+    # 「根拠が十分か」の判定の厳しさ。"strict" か "lenient"（agent.pyの_GRADE_SYSTEM_PROMPTS参照）。
+    grade_mode: str = "lenient"
 
 
 @dataclass
@@ -105,6 +107,7 @@ _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "SILORAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
     "SILORAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
     "SILORAG_AGENT_MAX_ATTEMPTS": ("agent", "max_attempts", int),
+    "SILORAG_AGENT_GRADE_MODE": ("agent", "grade_mode", str),
 }
 
 _SECTION_TYPES = {

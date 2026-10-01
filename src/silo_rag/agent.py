@@ -116,15 +116,34 @@ def _build_history_lines(history: list[tuple[str, str]] | None) -> list[str]:
 
 # --- 判定（根拠は十分か） ---------------------------------------------------------
 
-_GRADE_SYSTEM_PROMPT = (
+_GRADE_PROMPT_HEAD = (
     "あなたは社内ナレッジ検索の検索結果を点検する係です。"
     "質問と検索で見つかった資料の抜粋を読み、質問に答えるための根拠が資料に含まれているかを判定してください。"
     "会話履歴が付いている場合は、質問中の指示語（「それ」「さっきの」等）が何を指すかの解決にだけ使ってください。"
-    "資料は、質問と全く同じ案件・部署・プロジェクト種別である必要はありません。"
-    "テーマや失敗パターンが似ていて参考になる事例（他部署の事例を含む）が1件でも含まれていれば SUFFICIENT、"
-    "参考になる事例が1件も無ければ INSUFFICIENT と答えてください。"
-    "出力は SUFFICIENT か INSUFFICIENT のどちらか1語のみとし、説明は一切含めないでください。"
 )
+_GRADE_PROMPT_TAIL = "出力は SUFFICIENT か INSUFFICIENT のどちらか1語のみとし、説明は一切含めないでください。"
+
+# 判定の厳しさ（config.agent.grade_mode）。実データ（7Bモデル）では、どちらにも弱点があった:
+#   strict:  9回中8回が「不十分」。ほぼ毎回上限まで再検索し、時間は約2倍・LLM呼び出しは4〜5倍。
+#            代わりに、baselineでは拾えない正解を再検索で拾えることがある。
+#   lenient: すぐ「十分」と判定するため、多くの質問でbaselineと同じ結果になる。
+# 判定するLLMは「まだ見ていない、もっと良い資料があるか」を知りようがないため、どちらが良いかは
+# プロンプトの言い回しだけでは決まらない。eval.pyで両方を計測して比較する。
+_GRADE_SYSTEM_PROMPTS: dict[str, str] = {
+    "strict": (
+        _GRADE_PROMPT_HEAD
+        + "根拠が含まれていれば SUFFICIENT、含まれていなければ INSUFFICIENT と答えてください。"
+        + _GRADE_PROMPT_TAIL
+    ),
+    "lenient": (
+        _GRADE_PROMPT_HEAD
+        + "資料は、質問と全く同じ案件・部署・プロジェクト種別である必要はありません。"
+        + "テーマや失敗パターンが似ていて参考になる事例（他部署の事例を含む）が"
+        + "1件でも含まれていれば SUFFICIENT、参考になる事例が1件も無ければ INSUFFICIENT と答えてください。"
+        + _GRADE_PROMPT_TAIL
+    ),
+}
+GRADE_MODES = tuple(_GRADE_SYSTEM_PROMPTS)
 
 
 def _build_grade_prompt(
@@ -216,11 +235,15 @@ def _build_rerank_query(question: str, history: list[tuple[str, str]] | None) ->
 # --- グラフ ---------------------------------------------------------------------
 
 
-def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
+def build_graph(client: LLMClient, *, max_attempts: int, top_k: int, grade_mode: str = "lenient"):
     """エージェントのグラフを組み立てて、コンパイル済みのものを返す。
 
     clientはクロージャで各ノードに渡す（LLMClientはシリアライズできないため、Stateには入れない）。
+    grade_mode: 判定の厳しさ。"strict" か "lenient"（_GRADE_SYSTEM_PROMPTSのコメント参照）。
     """
+    if grade_mode not in _GRADE_SYSTEM_PROMPTS:
+        raise ValueError(f"grade_modeは{GRADE_MODES}のいずれかを指定してください: {grade_mode!r}")
+    grade_system_prompt = _GRADE_SYSTEM_PROMPTS[grade_mode]
 
     def retrieve(state: AgentState) -> dict:
         attempts = state["attempts"] + 1
@@ -250,7 +273,7 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int):
             return {"verdict": "insufficient", "trace": [*state["trace"], "判定: 不十分（検索結果0件）"]}
         prompt = _build_grade_prompt(state["question"], chunks, state["history"])
         try:
-            raw = client.chat(_GRADE_SYSTEM_PROMPT, prompt, temperature=0.0)
+            raw = client.chat(grade_system_prompt, prompt, temperature=0.0)
         except LLMConnectionError:
             return {
                 "verdict": "sufficient",
@@ -337,18 +360,22 @@ def run_agent(
     history: list[tuple[str, str]] | None = None,
     top_k: int | None = None,
     max_attempts: int | None = None,
+    grade_mode: str | None = None,
 ) -> AgentResult:
     """エージェントを1問ぶん実行する。引数の意味はretrieval.search()・generation.answer_question()と同じ。
 
     top_k: 判定・回答生成に使うチャンク数。Noneならconfig.retrieval.top_k_finalを使う。
     max_attempts: 検索の上限回数（初回を含む）。Noneならconfig.agent.max_attemptsを使う。
+    grade_mode: 判定の厳しさ（"strict"／"lenient"）。Noneならconfig.agent.grade_modeを使う。
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
     resolved_max = max_attempts if max_attempts is not None else config.agent.max_attempts
     resolved_max = max(1, resolved_max)
 
-    app = build_graph(client, max_attempts=resolved_max, top_k=resolved_top_k)
+    resolved_mode = grade_mode if grade_mode is not None else config.agent.grade_mode
+
+    app = build_graph(client, max_attempts=resolved_max, top_k=resolved_top_k, grade_mode=resolved_mode)
     initial: AgentState = {
         "question": question,
         "history": history,
