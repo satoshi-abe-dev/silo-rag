@@ -158,18 +158,22 @@ streamlit run src/silo_rag/app.py
 
 ```mermaid
 graph LR
-    A[datagen: 合成データ生成] --> B[ingest: パース/チャンキング/埋め込み]
-    B --> C[retrieval: ハイブリッド検索+リランキング]
-    B --> D[generation: 引用付き回答生成]
-    C --> E[eval: 検索精度+回答品質評価]
+    A["A datagen<br/>合成データ生成"] --> B["B ingest<br/>チャンキング・埋め込み"]
+    B --> C["C retrieval<br/>検索・リランキング"]
+    B --> D["D generation<br/>引用付き回答生成"]
+    C --> E["E eval<br/>精度・品質評価"]
     D --> E
-    E --> F[app: Streamlit UI]
-    C -.-> G[agent: LangGraphエージェント・オプション]
-    D -.-> G
-    G -.-> E
-    G -.-> F
-    C -.-> H[langchain_adapter: LangChain連携・オプション]
-    D -.-> H
+    E --> F["F app<br/>Streamlit UI"]
+```
+
+オプションのノードG・Hは、C・Dの上に載り、EやFから使われる。メインフローの外にあるので、別の図に分けた。
+
+```mermaid
+graph LR
+    CD["C retrieval<br/>D generation"] -.-> G["G agent<br/>LangGraph"]
+    CD -.-> H["H langchain_adapter<br/>LangChain連携"]
+    G -.-> E["E eval"]
+    G -.-> F["F app"]
     H -.-> E
 ```
 

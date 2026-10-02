@@ -158,18 +158,22 @@ The pipeline is designed as a DAG (directed acyclic graph) with clear dependenci
 
 ```mermaid
 graph LR
-    A[datagen: synthetic data generation] --> B[ingest: parsing/chunking/embedding]
-    B --> C[retrieval: hybrid search + reranking]
-    B --> D[generation: cited answer generation]
-    C --> E[eval: retrieval accuracy + answer quality evaluation]
+    A["A datagen<br/>synthetic data"] --> B["B ingest<br/>chunking, embedding"]
+    B --> C["C retrieval<br/>search, reranking"]
+    B --> D["D generation<br/>cited answers"]
+    C --> E["E eval<br/>accuracy, quality"]
     D --> E
-    E --> F[app: Streamlit UI]
-    C -.-> G[agent: LangGraph agent, optional]
-    D -.-> G
-    G -.-> E
-    G -.-> F
-    C -.-> H[langchain_adapter: LangChain integration, optional]
-    D -.-> H
+    E --> F["F app<br/>Streamlit UI"]
+```
+
+The optional nodes G and H build on C and D and are used by E and F. They sit outside the main flow, so they get their own diagram.
+
+```mermaid
+graph LR
+    CD["C retrieval<br/>D generation"] -.-> G["G agent<br/>LangGraph"]
+    CD -.-> H["H langchain_adapter<br/>LangChain integration"]
+    G -.-> E["E eval"]
+    G -.-> F["F app"]
     H -.-> E
 ```
 
