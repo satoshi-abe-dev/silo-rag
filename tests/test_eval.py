@@ -264,3 +264,13 @@ def test_format_comparison_marks_rewrite_first_runs():
 
     assert lines[2].startswith("| agent(strict) / qwen-7b |")
     assert lines[3].startswith("| agent(strict,rewrite-first) / qwen-7b |")
+
+
+def test_format_comparison_marks_single_search_runs():
+    payload = _payload("agent", "lenient", "qwen-7b", "qwen-7b", 0.7)
+    payload["run"]["first_query"] = "rewrite"
+    payload["run"]["max_attempts"] = 1
+
+    lines = format_comparison([("a", payload)]).splitlines()
+
+    assert lines[2].startswith("| agent(lenient,rewrite-first,1-search) / qwen-7b |")

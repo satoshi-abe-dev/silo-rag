@@ -296,6 +296,8 @@ def _run_label(payload: dict, fallback: str) -> str:
     if run.get("grade_mode"):
         # 1回目に質問そのまま（raw）で検索するのが既定。クエリを作る方（rewrite）のときだけ印を付ける。
         detail = [run["grade_mode"], *(["rewrite-first"] if run.get("first_query") == "rewrite" else [])]
+        if run.get("max_attempts") == 1:
+            detail.append("1-search")  # 再検索しない（クエリ作成だけの効果を見るための切り分け）
         label += f"({','.join(detail)})"
     return f"{label} / {run['llm_model']}"
 

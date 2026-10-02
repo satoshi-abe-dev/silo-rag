@@ -242,7 +242,7 @@ def test_retry_keeps_earlier_evidence_when_latest_fills_top_k(fake_pipeline):
     fake_pipeline.results = [[_sc("first-a"), _sc("first-b")], [_sc("second-a"), _sc("second-b")]]
     client = _ScriptedAgentClient(grades=["INSUFFICIENT", "SUFFICIENT"], rewrites=["別のクエリ"])
 
-    run_agent(client, "質問", top_k=2, max_attempts=2)
+    run_agent(client, "質問", top_k=2, max_attempts=3)
 
     assert fake_pipeline.generated_with == ["second-a", "first-a"]
     # 2回目の判定にも、前回の根拠が含まれている。
@@ -471,3 +471,27 @@ def test_rewrite_first_loop_stops_at_max_attempts(fake_pipeline):
 
     assert result.attempts == 3
     assert result.answer is not None
+
+
+def test_grade_is_skipped_once_the_search_cap_is_reached(fake_pipeline):
+    # 上限に達したら、判定のLLMを呼ばない（結果はどちらでも回答生成に進むだけなので、無駄な呼び出し）。
+    fake_pipeline.results = [[_sc("a")], [_sc("b")], [_sc("c")]]
+    client = _ScriptedAgentClient(grades=["INSUFFICIENT"] * 2, rewrites=["クエリ2", "クエリ3"])
+
+    result = run_agent(client, "質問", top_k=5, max_attempts=3)
+
+    assert client.grade_calls == 2  # 3回目の検索のあとは判定しない
+    assert any("判定: 省略" in t for t in result.trace)
+    assert result.answer is not None
+
+
+def test_single_search_never_calls_grade_or_rewrite(fake_pipeline):
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(plans=["クエリ"])
+
+    result = run_agent(client, "質問", top_k=5, max_attempts=1, first_query="rewrite")
+
+    assert client.grade_calls == 0
+    assert client.rewrite_calls == 0
+    assert client.plan_calls == 1
+    assert result.attempts == 1

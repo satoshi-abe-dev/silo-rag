@@ -311,6 +311,9 @@ def build_graph(
         }
 
     def grade(state: AgentState) -> dict:
+        if state["attempts"] >= max_attempts:
+            # もう再検索できないので、判定の結果は何も変えない（どちらでも回答生成に進む）。LLMを呼ばない。
+            return {"verdict": None, "trace": [*state["trace"], "判定: 省略（検索の上限に達したため）"]}
         chunks = state["scored_chunks"][:top_k]
         if not chunks:
             # 判定するまでもなく根拠が無い。LLMを呼ばずに「不十分」とする。
