@@ -27,7 +27,9 @@ This follows a question through each processing step, using **real values**. It 
 | 5. Reranking (LLM) | the 20 candidates → ordered by relevance to the question → top 5 |
 | 6. Answer generation (LLM) | the top 5 chunks → an answer with citations |
 
-Steps 1–5 are the inside of `search()` in retrieval (node C); step 6 is answer generation (node D).
+Steps 2–5 are the inside of `search()` in retrieval (node C). Step 1 is done by the agent's (node G) `plan` node before the
+query is handed to `search()` (plain mode has no such step; the question goes straight to `search()`). Step 6 is answer
+generation (node D).
 
 ## 0. Ingestion: one report becomes chunks and vectors
 
@@ -66,7 +68,8 @@ BM25, on the other hand, uses the chunk text itself (recomputed over all chunks 
 | Query | 予算策定プロセス見直し マーケティング施策 社内事例 実施条件 注意点 | 26 |
 
 "Are there…?" and "please tell me" are gone; the words for what is being looked for remain.
-(Pieces are counted by cutting the Japanese into two-character pieces.)
+(Pieces are counted as in the search preprocessing: Japanese is cut into overlapping two-character pieces — "予算策定" →
+"予算", "算策", "策定" — and an ASCII word counts as one piece.)
 
 ### 2–4. BM25, vector search, blending
 
@@ -85,7 +88,8 @@ BM25, on the other hand, uses the chunk text itself (recomputed over all chunks 
 
 ### 5. Reranking (LLM)
 
-The LLM reorders the blended top 20 by relevance to the question and picks the top 5.
+The LLM reorders the blended top 20 by relevance to the question and picks the top 5. (The reranking LLM receives the
+**rewritten query**; the answer-generating LLM receives the original question.)
 
 1. RPT-018::プロジェクト目的 2. RPT-018::与件 3. RPT-015::対象領域・テーマ 4. RPT-035::プロジェクト目的
 5. RPT-016::対象領域・テーマ
@@ -94,14 +98,15 @@ The LLM reorders the blended top 20 by relevance to the question and picks the t
 
 ### 6. Answer generation (LLM)
 
-The answer is written from the top 5 chunks only. The citations are attached mechanically from the chunks' metadata.
+The answer is written from the top 5 chunks only. Inline references such as "(RPT-018)" are written by the LLM. Separately,
+a list of sources is built mechanically from the metadata of the top 5 chunks (deduplicated by report and section).
 
 > (translated) As an in-house case that reviewed the budget-planning process for a marketing initiative, the Planning Dept.
 > ran "Review of the budget-planning process for marketing initiatives" (RPT-018). That project called for a detailed
 > review, because past projects had repeatedly overrun their budgets (RPT-018). … (rest omitted)
 
-Citations: RPT-018 (Planning), RPT-015 (Planning), RPT-035 (Planning), RPT-016 (Product Development). The gold report,
-RPT-018, is included.
+The source list has five entries: two sections of RPT-018 (Planning), RPT-015 (Planning), RPT-035 (Planning), and RPT-016
+(Product Development). The gold report, RPT-018, is included.
 
 ## Example 2: a question that doesn't work (QA-001)
 
@@ -171,9 +176,12 @@ comes from, I counted per step over all 15 questions. Numbers are "questions (of
 | Right after blending, top 5 | 10 | 12 | 11 |
 | Blended top 20 (the reranking candidates) | 15 | 15 | 15 |
 
-- **BM25 improved a lot with the rewrite** (11 → 15). Removing the question's extra words makes the gold report more likely
-  to land in BM25's top results.
-- **Vector search barely changed** (5 → 5), and is weak to begin with (5–7 questions).
+- **BM25 improved a lot with the rewrite** (11 → 15). But a rewrite does more than drop extra words: it also changes the
+  choice of words and the spacing (the 7B query for QA-001, for instance, drops "既存"). Whether "removing the extra
+  words" is the reason is unconfirmed — I did not run an experiment that isolates it.
+- **Vector search was unchanged in total** (5 → 5) and is weak to begin with (5–7 questions). Per question, though, two
+  questions gained a hit and two lost one, so they merely swapped places. Vector rankings and scores are also used in the
+  blending, so they can affect the blended result even when the top-5 hit count does not change.
 - **The 20 reranking candidates already contained the gold report for all 15 questions, even before rewriting.** So
   misses do not happen in collecting candidates; they happen in choosing the top 5 from them.
 
@@ -184,6 +192,8 @@ comes from, I counted per step over all 15 questions. Numbers are "questions (of
 | **Candidates: question as is** (plain mode) | 9 | 12 |
 | **Candidates: rewritten** | **15** | 14 (the agent's default) |
 
+- The rewritten query is handed to BM25 and vector search at the same time, so this result cannot be called "BM25's effect
+  alone".
 - Collecting candidates with the rewritten query helps a lot (9 → 15). Using the rewritten query only for reranking also
   helps (9 → 12). Rewriting both is not additive (14).
 - The best combination was "collect candidates with the rewritten query, rerank with the original question" (15). With it,
