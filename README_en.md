@@ -120,7 +120,14 @@ streamlit run src/silo_rag/app.py
 - **The application itself (UI, generated data, LLM prompts) is Japanese-only.** The bilingual README is for portfolio readability, separate from the app's language support
 - **Conversation history is used only to interpret follow-up search questions** (e.g., "tell me more about that"). Meta-questions about the conversation itself ("what did I just say?") are intentionally answered with "no matching case found"
 
-> 💡 **If you just want to run it, this is enough.** The rest covers the DAG internals and the development process.
+> [!TIP]
+> **If you just want to run it, this is enough.**
+> The rest covers the design and the development process. Read only what interests you.
+>
+> - How the system is organized: [Architecture (DAG)](#architecture-dag)
+> - How one question becomes an answer: [Worked example](#worked-example-how-one-question-becomes-an-answer)
+> - How it was developed: [Development process](#development-process-graph-engineering--independent-review)
+> - The agent's design and measured results: [Node G](#node-g-the-langgraph-agent) and [Node H](#node-h-langchain-integration)
 
 ---
 
