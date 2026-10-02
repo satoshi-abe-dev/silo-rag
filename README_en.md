@@ -126,7 +126,7 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 - **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (search, grade, rewrite) appears under each answer.
 - **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`), and
   `--pipeline langchain` for the stock LangChain agent. To compare plain mode and the agents in one go,
-  `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` runs 3–5 variants and prints a comparison table.
+  `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` runs 3 variants (6 with `--rewrite-first`) and prints a comparison table.
 - **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The defaults are `first_query = "rewrite"` and
   `max_attempts = 1` (write the search query, search once) — the combination that measured best on a small model (7B), and
   one that shows no difference from plain mode on 32B (see the evaluation under node G).
