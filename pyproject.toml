@@ -27,6 +27,9 @@ dependencies = [
 [project.optional-dependencies]
 # `pip install -e ".[dev]"` でテスト・lintツールも含めて導入する。
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
+# `pip install -e ".[agent]"` でLangGraph版エージェント（src/silo_rag/agent.py）を使えるようにする。
+# baselineだけ使う場合は不要。langchain-coreもlanggraphの依存として一緒に入る。
+agent = ["langgraph>=1.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

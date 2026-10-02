@@ -3,6 +3,8 @@
 質問応答チャット + 引用元（類似事例）一覧を表示する、社内ナレッジ検索RAGのデモUI。
 retrieval.search() と generation.answer_question() をこの層で初めて組み合わせる
 （両モジュールはDAG上お互いに依存しないよう独立実装されているため）。
+サイドバーで「エージェント」を選ぶと、代わりに agent.run_agent()（LangGraph、DAGノードG）で回答し、
+エージェントが何をしたか（検索・判定・書き直しの記録）を回答の下に表示する。
 
 起動方法: streamlit run src/silo_rag/app.py
 （`streamlit run` はファイルを直接実行するため、他モジュールのような相対import
@@ -12,12 +14,14 @@ retrieval.search() と generation.answer_question() をこの層で初めて組�
 
 from __future__ import annotations
 
+import importlib.util
+
 import streamlit as st
 
 from silo_rag.config import load_config
 from silo_rag.datagen import DEPARTMENTS, PROJECT_TYPES
 from silo_rag.generation import Answer, answer_question
-from silo_rag.llm_client import LLMClient, LLMConnectionError
+from silo_rag.llm_client import LLMClient
 from silo_rag.retrieval import ScoredChunk, search
 
 st.set_page_config(page_title="部署横断ナレッジ検索", page_icon="🔧")
@@ -41,6 +45,27 @@ def _filter_widgets() -> dict[str, str]:
     if project_type != "(指定なし)":
         filters["project_type"] = project_type
     return filters
+
+
+_MODE_BASELINE = "通常（1回検索）"
+_MODE_AGENT = "エージェント（LangGraph・必要なら再検索）"
+
+
+def _mode_widget() -> str:
+    """回答方式の切り替え。langgraph（任意依存 .[agent]）が無い環境では通常モードのみ。"""
+    st.sidebar.header("回答方式")
+    if importlib.util.find_spec("langgraph") is None:
+        st.sidebar.caption('エージェントを使うには `pip install -e ".[agent]"` が必要です。')
+        return _MODE_BASELINE
+    return st.sidebar.radio("方式", [_MODE_BASELINE, _MODE_AGENT], label_visibility="collapsed")
+
+
+def _render_trace(trace: list[str] | None) -> None:
+    if not trace:
+        return
+    with st.expander("エージェントの動き"):
+        for line in trace:
+            st.text(line)
 
 
 def _render_citations(answer: Answer, scored_chunks: list[ScoredChunk]) -> None:
@@ -72,16 +97,18 @@ def main() -> None:
         )
         st.stop()
 
+    mode = _mode_widget()
     filters = _filter_widgets()
 
     if "history" not in st.session_state:
         st.session_state.history = []
 
-    for question, answer, scored in st.session_state.history:
+    for question, answer, scored, past_trace in st.session_state.history:
         with st.chat_message("user"):
             st.write(question)
         with st.chat_message("assistant"):
             st.write(answer.text)
+            _render_trace(past_trace)
             _render_citations(answer, scored)
 
     # st.chat_input はEnterキーで即送信する設計のため、日本語入力時に漢字変換を
@@ -106,23 +133,26 @@ def main() -> None:
         st.write(question)
 
     # 会話履歴（指示語頼みのフォローアップ質問を検索・生成の両方で解決するために渡す）。
-    history = [(q, a.text) for q, a, _ in st.session_state.history] or None
+    history = [(q, a.text) for q, a, _, _ in st.session_state.history] or None
 
+    trace: list[str] | None = None
     with st.spinner("検索・回答生成中..."):
         try:
-            scored = search(client, question, filters=filters or None, history=history)
+            if mode == _MODE_AGENT:
+                from silo_rag.agent import run_agent
+
+                result = run_agent(client, question, filters=filters or None, history=history)
+                answer, scored, trace = result.answer, result.scored_chunks, result.trace
+            else:
+                scored = search(client, question, filters=filters or None, history=history)
+                answer = answer_question(client, question, [sc.chunk for sc in scored], history=history)
         except RuntimeError as exc:
             # ChromaDBコレクション未作成（ingest未実行）などの構成エラー。
-            st.error(str(exc))
-            return
-        chunks = [sc.chunk for sc in scored]
-        try:
-            answer = answer_question(client, question, chunks, history=history)
-        except LLMConnectionError as exc:
+            # LLMConnectionErrorもRuntimeErrorのサブクラスなので、ここでまとめて表示する。
             st.error(str(exc))
             return
 
-    st.session_state.history.append((question, answer, scored))
+    st.session_state.history.append((question, answer, scored, trace))
     st.rerun()
 
 
