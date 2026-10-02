@@ -84,11 +84,11 @@ candidates.
 
 | Rank | Keyword search (score) | Semantic search (score) | Combined (score = 0.5 × keyword part + 0.5 × semantic part) |
 | --- | --- | --- | --- |
-| 1 | RPT-018::対象領域・テーマ (123.8) | RPT-018::プロジェクト目的 (-0.353) | RPT-018::プロジェクト目的 (0.98 = 0.5×0.96 + 0.5×1.00) |
-| 2 | RPT-018::プロジェクト目的 (122.4) | RPT-018::与件 (-0.410) | RPT-018::対象領域・テーマ (0.74 = 0.5×1.00 + 0.5×0.47) |
-| 3 | RPT-016::対象領域・テーマ (105.6) | RPT-056::プロジェクト目的 (-0.410) | RPT-018::与件 (0.40 = 0.5×0.24 + 0.5×0.56) |
-| 4 | RPT-018::与件 (97.8) | RPT-035::プロジェクト目的 (-0.415) | RPT-035::プロジェクト目的 (0.36 = 0.5×0.21 + 0.5×0.51) |
-| 5 | RPT-025::プロジェクト目的 (96.8) | RPT-044::実施条件 (-0.419) | RPT-025::プロジェクト目的 (0.33 = 0.5×0.21 + 0.5×0.45) |
+| 1 | RPT-018::対象領域・テーマ (123.8) | RPT-018::プロジェクト目的 (-0.353) | RPT-018::プロジェクト目的 (0.98 ≈ 0.5×0.96 + 0.5×1.00) |
+| 2 | RPT-018::プロジェクト目的 (122.4) | RPT-018::与件 (-0.410) | RPT-018::対象領域・テーマ (0.74 ≈ 0.5×1.00 + 0.5×0.47) |
+| 3 | RPT-016::対象領域・テーマ (105.6) | RPT-056::プロジェクト目的 (-0.410) | RPT-018::与件 (0.40 ≈ 0.5×0.24 + 0.5×0.56) |
+| 4 | RPT-018::与件 (97.8) | RPT-035::プロジェクト目的 (-0.415) | RPT-035::プロジェクト目的 (0.36 ≈ 0.5×0.21 + 0.5×0.51) |
+| 5 | RPT-025::プロジェクト目的 (96.8) | RPT-044::実施条件 (-0.419) | RPT-025::プロジェクト目的 (0.33 ≈ 0.5×0.21 + 0.5×0.45) |
 
 **How the scores are combined**
 
@@ -97,11 +97,15 @@ candidates.
 2. **Normalize each one.** For each search, within its top 20, the best score becomes 1.00 and the worst becomes 0.00, and the
    scores in between are rescaled proportionally into the 0–1 range. The formula is
    `(score − lowest) ÷ (highest − lowest)`. In the table, the keyword search's highest score, 123.8, becomes 1.00 and
-   122.4 becomes 0.96; the semantic search's highest, -0.353, becomes 1.00 and -0.410 becomes 0.56.
+   122.4 becomes 0.96; the semantic search's highest, -0.353, becomes 1.00 and -0.410 becomes 0.56. There are two
+   exceptions. **If all 20 scores are equal** (the division is undefined), every chunk gets 1.00. **If the keyword search's
+   highest score is 0 or below** (no chunk matched any word), every chunk gets 0.00.
 3. **Add the normalized scores, half and half.** The combined score is
    `0.5 × keyword part + 0.5 × semantic part`. The 0.5 is the `vector_weight` setting; raise it to favor semantic search. For
    the first row, the keyword part is 0.96 and the semantic part is 1.00, so 0.5×0.96 + 0.5×1.00 = 0.98. A chunk that is not in
-   one search's top 20 counts as 0.00 on that side.
+   one search's top 20 counts as 0.00 on that side. Also, the formulas in the tables (≈) use values rounded to two decimals, so
+   the last digit may not match; the real calculation uses the unrounded values (for example, 0.5×0.01 + 0.5×1.00 = 0.505, but
+   the table shows 0.50).
 
 The combined first place is a chunk that was second in keyword search and first in semantic search. Chunks that score high on
 both rise.
@@ -156,11 +160,11 @@ In keyword search (BM25), **the gold report RPT-041 moved from third place to fi
 
 | Rank | Keyword search (score) | Semantic search (score) | Combined (score = 0.5 × keyword part + 0.5 × semantic part) |
 | --- | --- | --- | --- |
-| 1 | **RPT-041::成果サマリー** (117.8) | RPT-017::推進体制 (-0.299) | RPT-017::推進体制 (0.50 = 0.5×0.01 + 0.5×1.00) |
-| 2 | RPT-018::対象領域・テーマ (112.7) | RPT-042::推進体制 (-0.309) | **RPT-041::成果サマリー** (0.50 = 0.5×1.00 + 0.5×0.00) |
-| 3 | RPT-016::対象領域・テーマ (111.9) | RPT-005::主要リソース (-0.342) | RPT-042::推進体制 (0.48 = 0.5×0.02 + 0.5×0.94) |
-| 4 | RPT-027::成果サマリー (109.9) | RPT-048::推進体制 (-0.345) | RPT-005::主要リソース (0.41 = 0.5×0.07 + 0.5×0.76) |
-| 5 | RPT-025::主要リソース (108.8) | RPT-019::推進体制 (-0.358) | RPT-048::推進体制 (0.37 = 0.5×0.00 + 0.5×0.74) |
+| 1 | **RPT-041::成果サマリー** (117.8) | RPT-017::推進体制 (-0.299) | RPT-017::推進体制 (0.50 ≈ 0.5×0.01 + 0.5×1.00) |
+| 2 | RPT-018::対象領域・テーマ (112.7) | RPT-042::推進体制 (-0.309) | **RPT-041::成果サマリー** (0.50 ≈ 0.5×1.00 + 0.5×0.00) |
+| 3 | RPT-016::対象領域・テーマ (111.9) | RPT-005::主要リソース (-0.342) | RPT-042::推進体制 (0.48 ≈ 0.5×0.02 + 0.5×0.94) |
+| 4 | RPT-027::成果サマリー (109.9) | RPT-048::推進体制 (-0.345) | RPT-005::主要リソース (0.41 ≈ 0.5×0.07 + 0.5×0.76) |
+| 5 | RPT-025::主要リソース (108.8) | RPT-019::推進体制 (-0.358) | RPT-048::推進体制 (0.37 ≈ 0.5×0.00 + 0.5×0.74) |
 
 The semantic-search top is filled with "推進体制" (project structure) chunks that have little to do with the question, and
 **RPT-041 is not among them** (which is why RPT-041's semantic part is 0.00 in the combined column). Even so, RPT-041 stays in

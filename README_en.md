@@ -204,7 +204,7 @@ C (retrieval) combines two searches of different kinds.
 - **Vector search (semantic search)**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
   measures whether the **meaning is close**. It handles paraphrases well.
 - **Combining the scores**: each score is **normalized** to 0–1 (the best score becomes 1, the worst 0, and the ones in
-  between are rescaled proportionally), then the two are added using `vector_weight` (0.5 by default). An LLM then reranks the
+  between are rescaled proportionally; if all scores are equal, all become 1, and if every keyword-search score is 0, all become 0), then the two are added using `vector_weight` (0.5 by default). An LLM then reranks the
   top candidates. A calculation example is in the [worked example](docs/worked_example_en.md).
 - **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing is deliberately simple (no
   morphological analyzer). Japanese text is cut into overlapping **two-character pieces** (for example "予算策定" → "予算",
