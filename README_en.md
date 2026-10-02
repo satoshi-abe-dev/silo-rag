@@ -114,17 +114,21 @@ itself still works fine without using the filters).
 
 ### Using the agent version (optional)
 
-Besides the plain search (search once, then answer), there's a LangGraph agent that rewrites the query and searches again when
-the results look insufficient (design and evaluation: [Node G](#node-g-the-langgraph-agent)). LangGraph is an optional
-dependency; everything in the plain mode works without it.
+Besides the plain search (search once, then answer), there are agents where the LLM writes the search query and, if needed, searches again
+(design and evaluation: [Node G](#node-g-the-langgraph-agent) and [Node H](#node-h-langchain-integration)). LangGraph and LangChain are
+optional dependencies; everything in the plain mode works without them.
 
 ```bash
-pip install -e ".[agent]"
+pip install -e ".[agent]"        # LangGraph agent (node G)
+pip install -e ".[langchain]"    # LangChain integration (node H); also installs langgraph
 ```
 
 - **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (search, grade, rewrite) appears under each answer.
-- **Evaluation**: `python -m silo_rag.eval --pipeline agent` (grading strictness via `--grade-mode strict|lenient`). To compare against plain mode, `bash scripts/compare_pipelines.sh <model name>` runs all three variants and prints a comparison table.
-- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`).
+- **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`), and
+  `--pipeline langchain` for the stock LangChain agent. To compare plain mode and the agents in one go,
+  `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` runs 3–5 variants and prints a comparison table.
+- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The recommendation for a small model (7B) is
+  `first_query = "rewrite"` and `max_attempts = 1` (see the evaluation under node G).
 
 ### Launching the UI
 
@@ -163,6 +167,9 @@ graph LR
     D -.-> G
     G -.-> E
     G -.-> F
+    C -.-> H[langchain_adapter: LangChain integration, optional]
+    D -.-> H
+    H -.-> E
 ```
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
@@ -173,7 +180,8 @@ graph LR
 | D | `src/silo_rag/generation.py` | - Generates answers grounded in retrieved chunks<br>- Attaches citations (report ID, section, **department**)<br>- Resolves references using conversation history | `llm_model` (answer generation) |
 | E | `src/silo_rag/eval.py` | - Measures retrieval accuracy (Recall@k, MRR)<br>- Measures answer quality (LLM-as-judge, citation coverage) | - Every model used by C and D<br>- `llm_model` (LLM-as-judge scoring) |
 | F | `src/silo_rag/app.py` | - Streamlit chat UI<br>- Filter by department/type, citation display | Every model used by C and D (invoked on every question) |
-| G (optional) | `src/silo_rag/agent.py` | - Runs a "search → grade → rewrite → search again" loop with LangGraph<br>- Details: [Node G](#node-g-the-langgraph-agent) | Every model used by C and D |
+| G (optional) | `src/silo_rag/agent.py` | - Runs "write a search query → search → grade → rewrite → search again" with LangGraph<br>- Details: [Node G](#node-g-the-langgraph-agent) | Every model used by C and D |
+| H (optional) | `src/silo_rag/langchain_adapter.py` | - Exposes the existing search as a LangChain Retriever<br>- Comparison against LangChain's stock agent<br>- Details: [Node H](#node-h-langchain-integration) | Every model used by C and D |
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
 
@@ -194,6 +202,7 @@ only `answer_question()`.
 - **B → C/D**: connected through ChromaDB. C and D import only the `Chunk` type (`from .ingest import Chunk`), not B's processing functions.
 - **C/D → E/F**: ordinary function calls — `eval.py` and `app.py` call `search()` / `answer_question()` directly.
 - **C/D → G → E/F**: G likewise only calls `search()` / `answer_question()` (and `rerank()`). E and F can switch between plain mode and G.
+- **C/D → H → E**: H likewise only calls the public functions around `search()` / `answer_question()`. E calls it through `--pipeline langchain` (for comparison).
 
 The stronger the dependency, the tighter the coupling (direct calls for the last, loose coupling for the first two).
 
@@ -229,7 +238,9 @@ graph is still a DAG**. The loop lives only inside this one node, as part of the
 
 ```mermaid
 graph TD
-    S((START)) --> R[retrieve: call search]
+    S((START)) -->|raw| R[retrieve: call search]
+    S -->|rewrite| P[plan: write a search query from the question]
+    P --> R
     R --> J[grade: is the evidence sufficient?]
     J -->|sufficient, or attempt cap reached| SEL[select: only after multiple searches, rerank everything collected against the original question]
     J -->|insufficient, under the cap| W[rewrite: write a query from a different angle]
@@ -240,44 +251,79 @@ graph TD
 ```
 
 The LLM decides "is the evidence sufficient?" and "what query to try next"; the code decides "how many times at most" via
-`[agent] max_attempts` in `config.toml` (3 by default).
+`[agent] max_attempts` in `config.toml` (3 by default). The first search query is chosen by `[agent] first_query`
+(`raw` = the question as is, `rewrite` = a search query the LLM writes from the question; `raw` by default).
 
 ### Design decisions
 
-- **LangGraph used directly, not LangChain's `create_agent`.** `create_agent` builds a fixed loop in which the LLM calls tools, and it presupposes the LLM's tool calling (function calling). Tool calling is often unreliable on ~7B local models (not verified here), so I built a graph of my own shape — search → grade → rewrite — directly in LangGraph.
+- **LangGraph used directly, not LangChain's `create_agent`.** `create_agent` builds a fixed loop in which the LLM calls tools, and it presupposes the LLM's tool calling (function calling). Tool calling is often unreliable on ~7B local models, so I built a graph of my own shape — search → grade → rewrite — directly in LangGraph. (I did run `create_agent` as a comparison target in [node H](#node-h-langchain-integration).)
 - **The LLM only answers in fixed formats.** Grading is the single word `SUFFICIENT` / `INSUFFICIENT`; rewriting is a single query line. The code parses them strictly (no substring matching). In the manual runs against a 7B model (4 questions, twice), every grading and rewriting response came back in the expected format.
 - **Auxiliary decisions never stop the run.** If grading or rewriting hits an LLM connection error, malformed output, or a repeated query, it moves on to generation with the chunks in hand. A failure in generation itself still propagates to the caller as before.
 - **The zero-external-transmission policy is unchanged.** Every LLM call goes through the existing `LLMClient` (local LM Studio, etc.). LangGraph sends nothing externally unless you set LangSmith environment variables (`LANGSMITH_TRACING`, etc.).
 - **Grading strictness has two levels (`strict` / `lenient`).** The grading LLM can't know whether a better document exists that it hasn't seen yet, so which level is better isn't settled by prompt wording alone. `strict` retried up to the cap on most questions (8 of 9 gradings said "insufficient"); `lenient` says "sufficient" quickly. I kept both and compared them in the evaluation.
+- **You can choose whether the first search query is written from the question (`first_query`).** A question contains a lot that has nothing to do with search — a self-introduction ("This is the planning department."), request phrasing ("please tell me") — and it scatters BM25 (character bigrams). So I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself if that fails). In the evaluation this mattered most.
+- **Grading is skipped once the search cap is reached.** No further search is possible, so the verdict can't change anything.
 
-### Evaluation: comparison with plain mode
+### Evaluation
 
-The same evaluation set (15 questions, 5 of them cross-department) was run through plain mode and the agent (`strict` / `lenient`), once each.
-
-| Answer model | Mode | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | Searches | LLM calls | Sec/question |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 7B | plain | 0.60 | 0.40 | 0.70 | 0.49 | 0.60 | 3.67 | 1.0 | 2.0 | 10.8 |
-| 7B | agent strict | **0.73** | 0.40 | **0.90** | 0.61 | 0.60 | 3.73 | 1.9 | 6.4 | 17.8 |
-| 7B | agent lenient | 0.67 | 0.40 | 0.80 | 0.54 | 0.60 | 3.80 | 1.4 | 4.5 | 14.6 |
-| 32B | plain | **0.87** | 1.00 | 0.80 | 0.71 | 0.87 | 3.60 | 1.0 | 2.0 | 50.4 |
-| 32B | agent strict | 0.87 | 1.00 | 0.80 | 0.72 | 0.80 | 3.33 | 2.5 | 8.2 | 88.9 |
-| 32B | agent lenient | 0.87 | 1.00 | 0.80 | 0.74 | 0.73 | 3.27 | 1.1 | 3.5 | 55.8 |
-
-7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit).
-LLM calls are the chat calls up to the answer (embeddings and judge scoring excluded).
+The same evaluation set (15 questions, 5 of them cross-department) was run once per variant. 7B = `qwen2.5-7b-instruct`,
+32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit). "Query writing" is `first_query = "rewrite"`;
+"1 search" is `max_attempts = 1` (no re-search). LLM calls are the chat calls up to the answer (embeddings and judge scoring excluded;
+measured before the "skip grading at the cap" change, so each question that reached the cap actually costs one call fewer than shown).
 The judge uses the same model as the answerer, so **judge scores are only comparable between rows of the same model**.
 
-- **The smaller the model, the more it helps.** With 7B, `strict` raised hit_rate from 0.60 to 0.73 (9 → 11 of 15 questions). The gain was on same-department questions (0.70 → 0.90). The 7B agent (17.8 s) closes about half the gap to 32B plain mode (50.4 s) in roughly a third of the time.
-- **It doesn't help a large-enough model.** With 32B, all three modes hit 13 of 15 questions — the same questions found, the same 2 missed. Plain mode was already strong, so there was nothing left to improve; `strict` cost about 1.8× the time and 4× the LLM calls. Citation rate and judge dipped slightly (retries may mix in other reports that generation doesn't separate well, but 15 questions can't establish that).
-- **Cross-department questions stayed at 0.40 with 7B.** All the gains came from same-department questions.
-- **Conclusion: plain mode stays the default.** The agent is positioned as an option for when you have to use a small model, trading time for accuracy.
+**7B**
 
-> ⚠️ **This is 15 questions, one run per mode; a one-question difference (0.07) can't be called a real difference,** and LLM output varies between runs. Read it as a trend. I also tried Gemma 4 26B (MoE, a thinking model), but thinking inflated the output tokens to about 174 s per question, so I cut it off midway and left it out of the comparison.
+| Variant | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | Searches | LLM calls | Sec/question |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Plain | 0.60 | 0.40 | 0.70 | 0.49 | 0.60 | 3.67 | 1.0 | 2.0 | 10.8 |
+| G strict | 0.73 | 0.40 | 0.90 | 0.61 | 0.60 | 3.73 | 1.9 | 6.4 | 17.8 |
+| G lenient | 0.67 | 0.40 | 0.80 | 0.54 | 0.60 | 3.80 | 1.4 | 4.5 | 14.6 |
+| G strict + query writing | 0.80 | 0.60 | 0.90 | 0.66 | 0.80 | 3.73 | 2.4 | 9.0 | 19.5 |
+| G lenient + query writing | 0.87 | 0.60 | 1.00 | 0.69 | 0.80 | 3.60 | 1.6 | 6.2 | 14.9 |
+| **G lenient + query writing + 1 search** | **0.93** | **0.80** | 1.00 | 0.72 | **0.87** | 3.53 | 1.0 | 4.0 | **12.0** |
+| LangChain stock ([node H](#node-h-langchain-integration)) | **0.93** | **0.80** | 1.00 | 0.54 | **0.87** | 3.73 | 1.3 | 3.3 | 18.6 |
+
+**32B**
+
+| Variant | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | Searches | LLM calls | Sec/question |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Plain | 0.87 | 1.00 | 0.80 | 0.71 | 0.87 | 3.60 | 1.0 | 2.0 | 50.4 |
+| G strict | 0.87 | 1.00 | 0.80 | 0.72 | 0.80 | 3.33 | 2.5 | 8.2 | 88.9 |
+| G lenient | 0.87 | 1.00 | 0.80 | 0.74 | 0.73 | 3.27 | 1.1 | 3.5 | 55.8 |
+| G lenient + query writing | 0.87 | 0.60 | 1.00 | 0.73 | 0.80 | 3.00 | 1.2 | 4.8 | 63.8 |
+| G lenient + query writing + 1 search | 0.93 | 0.80 | 1.00 | 0.72 | 0.87 | 3.33 | 1.0 | 4.0 | 57.2 |
+
+I didn't measure the 32B model with the stock LangChain agent (LM Studio's model list shows no tool-support icon for it).
+
+- **What helped was not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. The self-introduction and request phrasing in the question had been scattering BM25. Cross-department questions also rose from 0.40 to 0.80 (query writing + 1 search).
+- **This breakdown was prompted by losing to the stock LangChain agent.** It reached 0.93 without searching more. Looking into it, the LLM rewrote the question into a keyword-style query before every search, while my G used the question as is on the first search. My original hypothesis ("re-search makes up for it") was only half right.
+- **With 32B, none of the tweaks shows a clear effect.** Plain mode was already at 0.87; query writing + 1 search got 0.93 (one question). Cross-department dropped from 1.00 to 0.80 (one question), and to 0.60 once re-search was added.
+- **Conclusion: plain mode (`first_query = "raw"`) stays the default; the agent is an option for when you have to use a small model.** The recommendation then is `first_query = "rewrite"` with `max_attempts = 1` (write the query, search once). The re-search loop showed no benefit on top of query writing with either model.
+
+> ⚠️ **This is 15 questions, one run per variant; a one-question difference (0.07) can't be called a real difference,** and LLM output varies between runs (the same question sometimes found the gold report and sometimes didn't). Read it as a trend. I also tried Gemma 4 26B (MoE, a thinking model), but thinking inflated the output tokens to about 174 s per question, so I cut it off midway and left it out of the comparison.
 
 ### Problems found along the way
 
 - **Three findings from the independent review (codex):** (1) CI didn't install the optional dependency, so the new tests couldn't be collected; (2) a retry returning `top_k` chunks pushed out all earlier evidence; (3) the grading prompt had no conversation history, so follow-up questions couldn't be graded. Each was reproduced with a mock, fixed, and given a regression test.
 - **Three findings from running it against a real LLM (7B):** (1) grading was so strict it retried up to the cap every time; (2) rewritten queries included the asker's own department, biasing search toward it; (3) interleaving the retries' results pushed out a gold report the original query had found (fixed by the `select` node, which reranks everything collected against the original question). Mock-based tests alone didn't surface these.
+- **A design mistake found by the evaluation:** the original hypothesis that "re-search helps" was only half right. What helped was how the first query was written (above).
+
+## Node H: LangChain integration
+
+`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). Like node G, it only calls the public functions of C and D and doesn't touch their insides.
+
+1. **`SiloRetriever`**: exposes the existing hybrid search (`search()`) as a LangChain Retriever (`BaseRetriever` from `langchain_core`). The search internals (BM25 + vectors + LLM reranking) are unchanged, and it can be used as a component from LangChain chains and agents.
+2. **`run_langchain_agent`**: uses that Retriever as a search tool for LangChain's stock `create_agent` (the LLM searches through tool calling) and answers with it. It is the comparison target for the hand-built node G, with the same answer policy and the same search cap.
+
+LLM calls go through the existing `LLMClient` for things like in-search reranking and through `ChatOpenAI` for the agent's own decisions — both pointed at the local LM Studio (`config.ai.base_url`) — so the zero-external-transmission policy is unchanged. Evaluate it with `python -m silo_rag.eval --pipeline langchain`.
+The result is the 7B table above (hit_rate 0.93, citation rate 0.87). Its retrieval metrics are computed over every chunk the tool returned, so more searches favor it (it surfaced 4.5 reports on average versus 4.0 for plain mode — a small gap); citation rate and judge compare fairly.
+
+### What running the stock agent on a small model showed
+
+- **Parallel tool calls broke search.** When the LLM calls the search tool several times in one response, LangGraph runs them concurrently on threads. `search()` assumes a single thread, and failed on both ChromaDB (the same folder opened concurrently) and LM Studio (concurrent embedding requests → HTTP 500). `SiloRetriever` now runs searches one at a time.
+- **One response tried to call the search tool about 50 times at once (282 s).** LangGraph's step limit (`recursion_limit`) only counts how many times the model re-thinks, not parallel calls within one response. `SiloRetriever` now caps how many searches it actually runs.
+- Neither showed up in mock-based tests; both appeared only when I ran a real 7B model.
 
 ## License
 
