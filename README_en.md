@@ -2,46 +2,41 @@
 
 [日本語](README_ja.md) | English
 
-**A portfolio implementation of an internal knowledge-search RAG for cross-department project lessons and know-how, industry- and role-agnostic by design. All processing runs on a local LLM, with nothing sent externally.**
+**A portfolio implementation of an internal knowledge-search RAG for cross-department project lessons and know-how. Everything runs on a local LLM, and nothing is sent externally.**
 
-> 🧭 **The requirements here are the author's own. Most of the technical implementation was proposed by AI, which the author reviewed and approved.**
+> 🧭 **The requirements are the author's own. Most of the technical implementation was proposed by AI, then reviewed and approved by the author.**
 >
-> - The theme: cross-department search for project lessons and know-how, industry- and role-agnostic. The motivation is a pattern the author has repeatedly seen across their career — weak cross-department collaboration and knowledge that never gets shared, which stalls innovation
-> - The requirement to mix file formats (Markdown/Word/Excel/PowerPoint/PDF), reflecting how file formats are often inconsistent in the real world
-> - The requirement to run everything on a local LLM with zero external transmission — a realistic constraint for business data that can be confidential
-> - The requirement to bring "graph engineering" into the development process. The concrete realization of that — decomposing work into DAG nodes, implementing independent nodes in parallel, and making an independent review from a different vendor's AI (the `codex` CLI) a required gate after each node — was AI's proposal
->
-> Individual technical decisions — the hybrid retrieval pipeline design, the `BM25Okapi` → `BM25Plus` bug fix (BM25 is a keyword-search scoring formula; see [the explanation](#terms-bm25-and-vector-search)), citation-based verifiability, the eval split design — were likewise proposed by AI (Claude Code) and approved by the author after an independent review (codex). AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits.
->
-> After implementation, the author ran the UI themselves and fed back the bugs and rough edges they noticed (chat turn ordering, the title wrapping, over-eager answers to off-topic input, no support for conversation-aware follow-up questions, etc.); the AI diagnosed and fixed each one.
+> - **The author's requirements**
+>   - Cross-department search for project lessons and know-how (industry- and role-agnostic). The motivation: weak collaboration between departments means knowledge never gets shared
+>   - Mixed file formats (Markdown/Word/Excel/PowerPoint/PDF), since real workplaces rarely standardize on one
+>   - All processing on a local LLM with zero external transmission (the data could be confidential)
+>   - "Graph engineering" in the development process
+> - **What AI turned those into**: decomposing the work into DAG nodes, implementing independent nodes in parallel, and making an independent review by a different vendor's AI (the `codex` CLI) a required gate after each node
+> - **Proposed by AI (Claude Code), approved by the author after independent review**: the hybrid retrieval design, the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](#terms-bm25-and-vector-search)), citations, and the eval split design
+> - AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits
+> - The author ran the UI and reported the bugs and rough edges they found (chat ordering, title wrapping, over-eager answers to small talk, no conversation-aware search, etc.); the AI diagnosed and fixed them
 
 ---
 
 ## Background and problem
 
-In any industry or role, starting a new project almost always means digging up questions like "has something similar been tried before?" or "what worked, and what went wrong?" But terminology, report formats, and information sharing often aren't fully standardized across departments, so useful lessons from other departments tend to get buried.
-
-This project demonstrates a value proposition: **as long as documents are kept in the right place, a RAG system can search and reuse them across departments even when information sharing between those departments is imperfect.**
-
-- Since real data isn't available, the project uses **synthetic data** — dummy internal project-retrospective reports modeling a general business setting (marketing / sales / product development / customer support / corporate planning), industry-agnostic.
-- **No company names appear anywhere, real or fictional.** The setting is anonymized as "multiple departments within a single company."
-- **File formats are deliberately mixed across Markdown, Word, Excel, PowerPoint, and PDF** (reflecting how file formats are often inconsistent in the real world).
-- Each report's "Outcome Summary" section has **one outcome chart attached** (a KPI trend or similar, synthesized with matplotlib). At ingest time, a local VLM (vision-capable model) captions it so the image content is also searchable.
-- Weak cross-department collaboration where knowledge never spreads is a common pattern. Even SPDM (Simulation Process and Data Management) adoption in engineering organizations often stalls for the same reason — reluctance to collaborate across departments, more than any technical barrier.
+- **Problem**: when starting a project, you want to find "what similar work was done before, what worked, and what went wrong." But terminology and formats differ between departments, so other departments' lessons get buried
+- **Value proposition**: as long as documents are kept in the right place, RAG can search and reuse them across departments, even when sharing between departments is imperfect
+- **The data is synthetic**: real data isn't available, so the reports are synthetic retrospectives for five generic business departments (marketing / sales / product development / customer support / corporate planning)
+  - No company names appear, real or fictional
+  - Five file formats are mixed
+  - Each report has one outcome chart (a KPI trend or similar); at ingest time a local VLM captions it so the image content is searchable too
+- Weak cross-department collaboration is usually a people problem more than a technical one (for example, adoption of a shared data-management platform stalling). This project is a small instance of the same structure
 
 ## Setup
 
 ### Prerequisites
 
 - Python 3.11 or later
-- A local LLM server speaking an OpenAI-compatible API, such as [LM Studio](https://lmstudio.ai/)
-  - Load three kinds of models: a chat model, an embedding model, and a **vision model (VLM) for image captioning** (e.g., something in the Qwen2.5-VL / Qwen3-VL family)
-  - Everything else works even without the VLM loaded — only image captioning is skipped, with a warning
-  - Connects to `http://localhost:1234/v1` by default — that's LM Studio's default port
-  - To use a different OpenAI-compatible server (e.g. Ollama), change `[ai] base_url`
-    in `config.toml` (Ollama's default is `http://localhost:11434/v1`), or override it
-    with the `SILORAG_AI_BASE_URL` environment variable (priority: env var >
-    `config.toml` > the code's built-in default)
+- A local LLM server with an OpenAI-compatible API, such as [LM Studio](https://lmstudio.ai/)
+  - Load three kinds of models: a chat model, an embedding model, and a **vision model (VLM) for image captioning** (e.g., the Qwen2.5-VL / Qwen3-VL family)
+  - Without the VLM everything else still works (only image captioning is skipped, with a warning)
+  - The default endpoint is `http://localhost:1234/v1`. For another server (e.g., Ollama at `http://localhost:11434/v1`), set `[ai] base_url` in `config.toml` or the `SILORAG_AI_BASE_URL` environment variable (priority: env var > `config.toml` > built-in default)
 
 ### Install
 
@@ -53,7 +48,8 @@ pip install -e .
 pip install -e ".[dev]"
 ```
 
-This installs Streamlit, ChromaDB, and every other dependency in one go — no need to `pip install streamlit` separately. Run every command below with this virtual environment activated (`source .venv/bin/activate`).
+- Streamlit, ChromaDB, and the other dependencies are installed together
+- Run every command below with the virtual environment activated
 
 ### Configure
 
@@ -61,80 +57,57 @@ This installs Streamlit, ChromaDB, and every other dependency in one go — no n
 cp config.example.toml config.toml
 ```
 
-Adjust LM Studio's base URL and model names in `config.toml` (these can also be overridden via environment variables such as `SILORAG_AI_LLM_MODEL` — see `src/silo_rag/config.py` for details).
+- Adjust the base URL and model names in `config.toml` (environment variables such as `SILORAG_AI_LLM_MODEL` also work; see `src/silo_rag/config.py`)
 
 ## Usage
 
-There are two ways to prepare data. Do either one, then launch the UI.
+There are two ways to prepare data. Do one of them, then launch the UI.
 
 ### Using the demo data
-
-The prep work before launching the UI (generate synthetic data → ingest → evaluate) can be run in one command.
 
 ```bash
 bash scripts/prepare_demo_data.sh
 ```
 
-It just runs these three in order, so run them directly if you want to redo a single step
-(see [Architecture](#architecture-dag) below for how each step is designed internally).
+It runs these three steps in order. To redo one step, run it directly.
 
 ```bash
-# Generate synthetic data (60 reports + 15 evaluation QA pairs by default)
-python -m silo_rag.datagen
-
-# Chunk + embed + store in ChromaDB
-python -m silo_rag.ingest
-
-# Evaluate (retrieval accuracy + answer quality, combined into one report)
-python -m silo_rag.eval
+python -m silo_rag.datagen   # generate synthetic data (60 reports + 15 evaluation QA pairs by default)
+python -m silo_rag.ingest    # chunk, embed, and store in ChromaDB
+python -m silo_rag.eval      # evaluate retrieval accuracy and answer quality
 ```
 
-While `datagen` runs, you may see a "generation failed" warning — a small local LLM doesn't always follow the required heading structure exactly. It retries automatically, both per-report and for the whole batch, so just let it run and it'll usually succeed. If it still fails, try a different model or re-run `python -m silo_rag.datagen` after a bit.
-
-`python -m silo_rag.eval` writes its results to `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, each with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The actual numbers depend on whichever models — and dataset — are loaded in LM Studio.
+- `datagen` may print "generation failed" (a small local LLM doesn't always follow the required heading structure). It retries automatically, so it usually succeeds if you wait. If it keeps failing, try another model or re-run later
+- `eval` writes `data/eval/eval_results.json` (broken down into overall / cross_dept / same_dept, with hit_rate, recall@k, MRR, citation_rate, and avg_judge_score). The numbers depend on the models and data
 
 ### Using your own reports
 
-`prepare_demo_data.sh` (and `datagen`/`eval`) is purely for trying the synthetic demo data.
-To use your own reports, skip `datagen` and `eval` and just run `ingest` directly
-(`eval` needs the synthetic gold-standard QA pairs, so it doesn't apply to your own data):
+- Skip `datagen` and `eval` (`eval` needs the synthetic QA pairs) and run only `ingest`
 
 ```bash
-python -m silo_rag.ingest --reports-dir <path to the directory containing your report files>
+python -m silo_rag.ingest --reports-dir <directory containing your reports>
 ```
 
-(Replace the `<...>` part with an actual path, e.g. `--reports-dir ~/Documents/reports`.)
-
-`ingest`'s parser itself is generic — any Markdown/Word/Excel/PowerPoint/PDF file split into
-a `---` frontmatter block plus `## heading` sections works, whatever field or heading names
-you use. That said, the Streamlit UI's sidebar filters (department / project-type dropdowns)
-are hardcoded to the demo's fixed vocabulary (`DEPARTMENTS` / `PROJECT_TYPES` in
-`datagen.py`), so they may not match your own data's categories (cross-department search
-itself still works fine without using the filters).
+- The parser is generic: any Markdown/Word/Excel/PowerPoint/PDF split into a `---` frontmatter block plus `## heading` sections loads, whatever the field and heading names
+- The UI's sidebar filters (department / project type) use the demo's fixed vocabulary (`DEPARTMENTS` / `PROJECT_TYPES` in `datagen.py`), so they may not match your categories (cross-department search itself works without the filters)
 
 ### Using the agent version (optional)
 
-Besides the plain search (search once, then answer), there are agents where the LLM writes the search query and, if needed, searches again
-(design and evaluation: [Node G](#node-g-the-langgraph-agent) and [Node H](#node-h-langchain-integration)). LangGraph and LangChain are
-optional dependencies; everything in the plain mode works without them.
+On top of plain mode (search once, then answer), there are agents where the LLM writes the search query and, if needed, searches again (design and evaluation: [Node G](#node-g-the-langgraph-agent), [Node H](#node-h-langchain-integration)). LangGraph and LangChain are optional dependencies; plain mode works without them.
 
 ```bash
 pip install -e ".[agent]"        # LangGraph agent (node G)
 pip install -e ".[langchain]"    # LangChain integration (node H); also installs langgraph
 ```
 
-- **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (search, grade, rewrite) appears under each answer.
-- **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`), and
-  `--pipeline langchain` for the stock LangChain agent. To compare plain mode and the agents in one go,
-  `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` runs 3 variants (6 with `--rewrite-first`) and prints a comparison table.
-- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The defaults are `first_query = "rewrite"` and
-  `max_attempts = 1` (write the search query, search once) — the combination that measured best on a small model (7B), and
-  one that shows no difference from plain mode on 32B (see the evaluation under node G).
+- **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (search, grade, rewrite) appears under each answer
+- **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`); `--pipeline langchain` for the stock LangChain agent
+  - To compare plain mode and the agents at once: `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` (3 variants; 6 with `--rewrite-first`)
+- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The defaults are `first_query = "rewrite"` and `max_attempts = 1` (write the query, search once), the combination that measured best on a 7B model
 
 ### Launching the UI
 
-Either way you prepared the data, launch the UI last (not included in either path above —
-it's a foreground process that keeps a browser tab open, so run it yourself).
+- It's a foreground process that keeps a browser tab open, so run it separately from data preparation
 
 ```bash
 streamlit run src/silo_rag/app.py
@@ -142,13 +115,12 @@ streamlit run src/silo_rag/app.py
 
 ## Constraints and scope
 
-- Since the data is synthetic, the numbers and cases aren't drawn from real practice
-- No company names are used, real or fictional
-- Designed to be industry- and role-agnostic rather than tied to one specific domain
-- **The application itself (UI, generated data, LLM prompts) is Japanese-only.** This README being bilingual is purely for portfolio readability, separate from the app's own language support
-- **Conversation history is used only to interpret follow-up search questions** (e.g. "tell me more about that"). It doesn't support meta-questions about the conversation itself, like "do you remember what I just said?" — that's not a department-knowledge search question, so the assistant intentionally declines with "no matching case found"
+- The data is synthetic, so the numbers and cases aren't from real practice
+- No company names are used, real or fictional. The design assumes a generic business domain, not one industry or role
+- **The application itself (UI, generated data, LLM prompts) is Japanese-only.** The bilingual README is for portfolio readability, separate from the app's language support
+- **Conversation history is used only to interpret follow-up search questions** (e.g., "tell me more about that"). Meta-questions about the conversation itself ("what did I just say?") are intentionally answered with "no matching case found"
 
-> 💡 **If you just want to run it, this is all you need.** From here on it's the internals of the DAG and the development process (graph engineering + independent review).
+> 💡 **If you just want to run it, this is enough.** The rest covers the DAG internals and the development process.
 
 ---
 
@@ -166,16 +138,11 @@ graph LR
     E --> F["F app<br/>Streamlit UI"]
 ```
 
-The optional nodes G and H build on C and D and are used by E and F. They sit outside the main flow, so they get their own diagram.
+The optional nodes G and H sit outside the main flow, so they are not in the diagram.
 
-```mermaid
-graph LR
-    CD["C retrieval<br/>D generation"] -.-> G["G agent<br/>LangGraph"]
-    CD -.-> H["H langchain_adapter<br/>LangChain integration"]
-    G -.-> E["E eval"]
-    G -.-> F["F app"]
-    H -.-> E
-```
+- **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). E (`--pipeline agent`) and F (the "agent" answer mode) call it only when selected
+- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `_build_citations` (a private function). E calls it only with `--pipeline langchain`
+- Both are imported only when used. Plain mode works without LangGraph or LangChain installed
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
 | --- | --- | --- | --- |
@@ -192,89 +159,73 @@ If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is 
 
 ### Terms: BM25 and vector search
 
-C (retrieval) combines two searches of different kinds.
+C combines two searches of different kinds.
 
-- **BM25 (keyword search)**: a **formula** that scores each document by how often, and how distinctively, the words of the
-  question appear in it. It is not an AI model and involves no training. Three ideas set the score:
-  1. The more often a question word appears in a document, the higher the score (with diminishing returns).
-  2. A word that appears in almost every document (the Japanese equivalents of "is", "please") barely counts, while a
-     rare word (say, "budget planning") counts a lot.
-  3. Long documents are discounted a little, since words are more likely to turn up in them.
-
-  It is good at searches where **the words themselves match** — part numbers, proper nouns, technical terms. It is weak at
-  treating a paraphrase ("budget" vs. "cost estimate") as the same thing, and when the question contains words unrelated
-  to the search, they raise the score of any document that happens to contain them, which can shift the ranking (a word that
-  is not in the index at all scores zero and changes nothing).
-- **Vector search (semantic search)**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
-  measures whether the **meaning is close**. It handles paraphrases well.
-- **Combining the scores**: each score is **normalized** to 0–1, then the two are added using `vector_weight` (0.5 by default).
-  Normalizing makes the best score 1 and the worst 0 and rescales the ones in between proportionally (exceptions: if the highest
-  and lowest scores are almost equal, all become 1; for keyword search, if the highest score is 0 or below, all become 0, and
-  that check comes first). An LLM then reranks the top candidates. A calculation example is in the
-  [worked example](docs/worked_example_en.md).
-- **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing is deliberately simple (no
-  morphological analyzer). Japanese text is cut into overlapping **two-character pieces** (for example "予算策定" → "予算",
-  "算策", "策定"), while ASCII words and IDs (such as `RPT-014`) are **kept whole and lowercased** (`rpt-014`). It uses
-  `BM25Plus` from the `rank_bm25` library. `BM25Okapi` can give a negative weight (IDF) to a word that appears in more than
-  half the documents, which genuinely happens on a small corpus, so it was replaced with `BM25Plus`, whose weight for any
-  indexed word stays positive (a query made only of words absent from the index scores zero under either).
+- **BM25 (keyword search)**: a **formula** that scores each document by how often, and how distinctively, the question's words appear in it. It is not an AI model and involves no training
+  - The more often a question word appears in a document, the higher the score (with diminishing returns)
+  - A word found in almost every document (the Japanese equivalents of "is", "please") barely counts; a rare word (say, "budget planning") counts a lot
+  - Long documents are discounted a little, since words turn up in them more easily
+  - Good at: searches where **the words themselves match** (part numbers, proper nouns, technical terms)
+  - Weak at: treating a paraphrase ("budget" vs. "cost estimate") as the same thing. Words unrelated to the search raise the score of any document that happens to contain them, which can shift the ranking (a word absent from the index scores zero and changes nothing)
+- **Vector search (semantic search)**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance measures whether the **meaning is close**. Handles paraphrases well
+- **Combining the scores**: each score is **normalized** to 0–1, then the two are added using `vector_weight` (0.5 by default). An LLM then reranks the top candidates
+  - Normalization: the best score becomes 1, the worst 0, and the rest are rescaled proportionally
+  - Exceptions: if the highest and lowest scores are almost equal, all become 1; for keyword search, if the highest score is 0 or below, all become 0 (checked first)
+  - A calculation example is in the [worked example](docs/worked_example_en.md)
+- **In this project**
+  - BM25's preprocessing is deliberately simple (no morphological analyzer)
+  - Japanese text is cut into overlapping **two-character pieces** (e.g., "予算策定" → "予算", "算策", "策定")
+  - ASCII words and IDs (such as `RPT-014`) are **kept whole and lowercased** (`rpt-014`)
+  - It uses `BM25Plus` from `rank_bm25`. `BM25Okapi` can give a negative weight (IDF) to a word found in more than half the documents, which genuinely happens on a small corpus, so it was replaced (under `BM25Plus`, the weight of any indexed word stays positive)
 
 ### Worked example: how one question becomes an answer
 
-[docs/worked_example_en.md](docs/worked_example_en.md) follows a question through ingestion, query writing, keyword search (BM25),
-semantic search (vector search), combining the scores, reranking, and answer generation, with real values. It has two examples — one that works and one that doesn't (the gold
-report was among the candidates but dropped in reranking) — and a step-by-step breakdown of where the query rewrite helps.
+[docs/worked_example_en.md](docs/worked_example_en.md) follows a question through every stage (ingestion, query writing, BM25, vector search, combining scores, reranking, answer generation) with real values.
 
-### What a "node" actually is
+- Two examples: one that works, and one that doesn't (the gold report was among the candidates but dropped in reranking)
+- A step-by-step breakdown of where the query rewrite helps
 
-A node is a unit of work with a clear input/output boundary. In this project, nodes A–F line
-up one-to-one with a single file each (granularity is a design choice — a node could just as
-well be a single function or a whole multi-file subsystem).
+### What a "node" is
 
-Each node keeps its internals to itself. `retrieval.py` has several private helper functions
-like `_bm25_search` and `_vector_search`, but exposes only `search()` — callers never need to
-know whether it's using BM25, vector search, or how reranking works. `generation.py` exposes
-only `answer_question()`.
+- **Node**: a unit of work with a clear input/output boundary. Nodes A–F each correspond to one file
+- **Internals stay hidden**: `retrieval.py` exposes only `search()`, and `generation.py` only `answer_question()`. Callers don't need to know whether BM25, vector search, or reranking is used inside
 
-### How nodes actually connect
+### How nodes connect
 
-- **A → B**: connected through files (`data/synth_reports/`). Zero import coupling.
-- **B → C/D**: connected through ChromaDB. C and D import only the `Chunk` type (`from .ingest import Chunk`), not B's processing functions.
-- **C/D → E/F**: ordinary function calls — `eval.py` and `app.py` call `search()` / `answer_question()` directly.
-- **C/D → G → E/F**: G likewise only calls `search()` / `answer_question()` (and `rerank()`). E and F can switch between plain mode and G.
-- **C/D → H → E**: H likewise only calls the public functions around `search()` / `answer_question()`. E calls it through `--pipeline langchain` (for comparison).
+- **A → B**: through files (`data/synth_reports/`). Zero import coupling
+- **B → C/D**: through ChromaDB. C and D import only the `Chunk` type (`from .ingest import Chunk`)
+- **C/D → E/F**: direct function calls (`eval.py` and `app.py` call `search()` / `answer_question()`)
+- **C/D → G → E/F**: G also just calls `search()` / `answer_question()` (and `rerank()`). E and F can switch between plain mode and G
+- **C/D → H → E**: besides `search()`, H uses D's `Answer` and `_build_citations` (a private function). E calls it via `--pipeline langchain` (for comparison)
+- The stronger the dependency, the tighter the coupling (direct calls are tight; files and the DB are loose)
 
-The stronger the dependency, the tighter the coupling (direct calls for the last, loose coupling for the first two).
+### Which nodes are independent
 
-### Which nodes are actually independent
-
-The only independent pair is C and D (retrieval and generation) — both depend on B, not on each other.
-
-| Pair | Dependency | Could be implemented in parallel? |
-| --- | --- | --- |
-| A-B, B-C, B-D, C-E, D-E, E-F | Yes | No — has to wait on its dependency |
-| **C-D** | **None** | **Yes — actually split across two parallel Agents** |
-
-Acyclic (no loops) just guarantees a valid build order exists at all; it's a separate claim from independence. Even a fully acyclic graph offers zero parallelism if it's one straight chain (A→B→C→D→E→F). The parallel-implementation payoff here came from the graph's actual shape — no arrow happens to connect C and D.
+- The only independent pair is **C and D**: both depend on B, not on each other
+- Every other pair (A-B, B-C, B-D, C-E, D-E, E-F) has a dependency and has to wait for it, so they can't be built in parallel
+- **C and D were actually implemented in parallel by two Agents**
+- "Acyclic" only guarantees a valid build order exists; it's separate from independence. A single straight chain (A→B→C→D→E→F) is acyclic yet offers zero parallelism. The payoff here came from the graph's shape: no arrow happens to connect C and D
 
 ## Development process (graph engineering + independent review)
 
-The development process itself was also a design target. The requirement to "bring graph engineering into the development process" (see 🧭 above) was concretized by AI as follows.
+The development process itself was a design target. The requirement to "bring graph engineering into the development process" (see 🧭) was concretized by AI as follows.
 
-What graph engineering — designing the pipeline as a DAG and making dependencies between modules explicit — offers, and where this project actually got each benefit:
+Graph engineering means designing the pipeline as a DAG and making dependencies between modules explicit. What this project actually got from it:
 
-- **Parallel implementation**: nodes with no dependency on each other (C: retrieval, D: generation) were handed to two Agents (subagents) running at the same time.
-- **Independent testability**: every node can be tested on its own, with fakes like `_FakeVLMClient` and `_ScriptedClient` standing in for the real LLM/VLM calls — the whole test suite passes in CI with no live LLM connection at all.
-- **Bug localization**: after each node's implementation finished, an independent code review from a local `codex` CLI (a different vendor's AI) was a required gate — any findings were fixed and re-reviewed before moving to the next node. It caught a real bug in `retrieval.py` (`BM25Okapi`'s IDF going negative and inverting the ranking) and a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`).
-- **Reusable module separation**: since each node is independent, rewriting or redoing just one of them later doesn't touch the others. In practice, follow-up changes like adjusting the system prompts, updating the test vocabulary, or revising the README have each been split across parallel Agents as independent tasks too.
-
-Deciding a build order isn't a benefit unique to graph engineering. What pays off is what making the dependencies explicit as a graph reveals: "the part that can be parallelized (C/D)" and "boundaries narrow enough to review in isolation."
+- **Parallel implementation**: nodes with no dependency on each other (C and D) were handed to two Agents (subagents) at the same time
+- **Independent testing**: fakes such as `_FakeVLMClient` and `_ScriptedClient` stand in for dependencies, so every node can be tested on its own with no live LLM
+- **Bug localization**: after each node, an independent review by the local `codex` CLI (a different vendor's AI) was a required gate. Findings were fixed and re-reviewed before moving on
+  - It caught `BM25Okapi`'s negative-IDF bug in `retrieval.py`
+  - It also caught a data-leak bug in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`)
+- **Reusability**: since each node is independent, rewriting one later doesn't touch the others. Follow-up work (prompt tweaks, test vocabulary changes, README updates) was likewise split across parallel Agents as independent tasks
+- Being able to decide a build order isn't unique to graph engineering. What paid off was what the explicit graph revealed: "the part that can be parallelized (C and D)" and "boundaries narrow enough to review in isolation"
 
 ## Node G: the LangGraph agent
 
-A new node (`src/silo_rag/agent.py`) that **only calls the public functions** of node C (retrieval) and node D (generation). It doesn't touch the
-insides of C or D, and C and D stay independent of each other (only G knows both — the same shape as E, which calls both), so **the module dependency
-graph is still a DAG**. The loop lives only inside this one node, as part of the runtime flow.
+A new node (`src/silo_rag/agent.py`) that **only calls the public functions** of nodes C and D.
+
+- It doesn't touch the insides of C or D, and C and D stay independent of each other (only G knows both)
+- So the **module dependencies are still a DAG**. The loop exists only inside this node, as part of the runtime flow
 
 ```mermaid
 graph TD
@@ -290,27 +241,36 @@ graph TD
     G --> X((END))
 ```
 
-The LLM decides "is the evidence sufficient?" and "what query to try next"; the code decides "how many times at most" via
-`[agent] max_attempts` in `config.toml` (1 by default, i.e. no re-search). The first search query is chosen by `[agent] first_query`
-(`raw` = the question as is, `rewrite` = a search query the LLM writes from the question; `rewrite` by default).
+- The LLM decides "is the evidence sufficient?" and "what query next"
+- The code decides "how many times at most" via `[agent] max_attempts` (1 by default, i.e., no re-search)
+- The first query is chosen by `[agent] first_query` (`raw` = the question as is; `rewrite` = a query the LLM writes from the question; `rewrite` by default)
 
 ### Design decisions
 
-- **LangGraph used directly, not LangChain's `create_agent`.** `create_agent` builds a fixed loop in which the LLM calls tools, and it presupposes the LLM's tool calling (function calling). Tool calling is often unreliable on ~7B local models, so I built a graph of my own shape — search → grade → rewrite — directly in LangGraph. (I did run `create_agent` as a comparison target in [node H](#node-h-langchain-integration).)
-- **The LLM only answers in fixed formats.** Grading is the single word `SUFFICIENT` / `INSUFFICIENT`; rewriting is a single query line. The code parses them strictly (no substring matching). In the manual runs against a 7B model (4 questions, twice), every grading and rewriting response came back in the expected format.
-- **Auxiliary decisions never stop the run.** If grading or rewriting hits an LLM connection error, malformed output, or a repeated query, it moves on to generation with the chunks in hand. A failure in generation itself still propagates to the caller as before.
-- **The zero-external-transmission policy is unchanged.** Every LLM call goes through the existing `LLMClient` (local LM Studio, etc.). LangGraph sends nothing externally unless you set LangSmith environment variables (`LANGSMITH_TRACING`, etc.).
-- **Grading strictness has two levels (`strict` / `lenient`).** The grading LLM can't know whether a better document exists that it hasn't seen yet, so which level is better isn't settled by prompt wording alone. `strict` retried up to the cap on most questions (8 of 9 gradings said "insufficient"); `lenient` says "sufficient" quickly. I kept both and compared them in the evaluation.
-- **You can choose whether the first search query is written from the question (`first_query`).** A question contains a lot that has nothing to do with search — a self-introduction ("This is the planning department."), request phrasing ("please tell me") — and I expected it to throw the search off (BM25 is [explained here](#terms-bm25-and-vector-search)). So I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself if that fails). In the evaluation this mattered most. Which step it helps was separated out step by step in the [worked example](docs/worked_example_en.md).
-- **Grading is skipped once the search cap is reached.** No further search is possible, so the verdict can't change anything.
+- **LangGraph used directly, not LangChain's `create_agent`**
+  - `create_agent` is a fixed loop built on the LLM's tool calling (function calling)
+  - Tool calling is often unreliable on ~7B local models
+  - So I built the "search → grade → rewrite" graph myself in LangGraph (`create_agent` was run as a comparison target in [node H](#node-h-langchain-integration))
+- **The LLM answers only in fixed formats**
+  - Grading is the single word `SUFFICIENT` / `INSUFFICIENT`; rewriting is one query line. The code parses them strictly (no substring matching)
+  - In manual runs on a 7B model (4 questions, twice), every response came back in the expected format
+- **Auxiliary decisions never stop the run**: a connection error, malformed output, or repeated query in grading or rewriting moves on to generation with the chunks in hand. A failure in generation itself still propagates to the caller
+- **Zero external transmission is unchanged**: every LLM call goes through the existing `LLMClient` (local LM Studio, etc.). LangGraph sends nothing externally unless you set LangSmith environment variables (`LANGSMITH_TRACING`, etc.)
+- **Grading strictness has two levels (`strict` / `lenient`)**
+  - The grading LLM can't know whether a better document exists that it hasn't seen, so prompt wording alone doesn't settle which level is better
+  - `strict` retried up to the cap on most questions (8 of 9 gradings said "insufficient"); `lenient` says "sufficient" quickly. I kept both and compared them
+- **You can choose whether the first query is written from the question (`first_query`)**
+  - A question contains a lot unrelated to search: a self-introduction ("This is the planning department."), request phrasing ("please tell me"). I expected that to scatter the search ([BM25](#terms-bm25-and-vector-search)), so I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself on failure)
+  - In the evaluation this mattered most. Where it helps is broken down step by step in the [worked example](docs/worked_example_en.md)
+- **Grading is skipped once the search cap is reached**: no further search is possible, so the verdict can't change anything
 
 ### Evaluation
 
-The same evaluation set (15 questions, 5 of them cross-department) was run once per variant. 7B = `qwen2.5-7b-instruct`,
-32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit). "Query writing" is `first_query = "rewrite"`;
-"1 search" is `max_attempts = 1` (no re-search). LLM calls are the chat calls up to the answer (embeddings and judge scoring excluded;
-measured before the "skip grading at the cap" change, so each question that reached the cap actually costs one call fewer than shown).
-The judge uses the same model as the answerer, so **judge scores are only comparable between rows of the same model**.
+- The same evaluation set (15 questions, 5 of them cross-department) was run once per variant
+- Models: 7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit)
+- In the tables, "query writing" is `first_query = "rewrite"` and "1 search" is `max_attempts = 1`
+- "LLM calls" are the chat calls up to the answer (embeddings and judge excluded). Measured before "skip grading at the cap", so each question that reached the cap actually costs one call fewer
+- The judge uses the same model as the answerer, so **judge scores are only comparable between rows of the same model**
 
 **7B**
 
@@ -336,34 +296,75 @@ The judge uses the same model as the answerer, so **judge scores are only compar
 
 I didn't measure the 32B model with the stock LangChain agent (LM Studio's model list shows no tool-support icon for it).
 
-- **What helped was not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. I separated out where it helps on 7B (see the [worked example](docs/worked_example_en.md)). The number of questions with the gold report in BM25's top 5 went from 11 to 15, and stayed at 5 in total for vector search alone (four questions swapped in and out). The rewritten query goes to both at the same time, so the final difference cannot be credited to BM25 alone. The 20 reranking candidates already contained the gold report for all 15 questions before rewriting, and the difference in the final result (9 → 14–15) came from both how candidates were collected (9 → 15) and which query was used to rerank (9 → 12). I have not confirmed explanations such as "a short query is easier for the reranking LLM to judge". Cross-department questions also rose from 0.40 to 0.80 (query writing + 1 search).
-- **This breakdown was prompted by losing to the stock LangChain agent.** It reached 0.93 without searching more. Looking into it, the LLM rewrote the question into a keyword-style query before every search, while my G used the question as is on the first search. My original hypothesis ("re-search makes up for it") was only half right.
-- **With 32B, none of the tweaks shows a clear effect.** Plain mode was already at 0.87; query writing + 1 search got 0.93 (one question). Cross-department dropped from 1.00 to 0.80 (one question), and to 0.60 once re-search was added.
-- **Conclusion: plain mode stays the default answer mode; the agent is an option for when you have to use a small model.** The agent's default settings are the best-measured `first_query = "rewrite"` with `max_attempts = 1` (write the query, search once). The re-search loop is still available by raising `max_attempts`, but it showed no benefit on top of query writing with either model. On 32B there was no difference from plain mode and cross-department questions tended to drop, so use plain mode with larger models. (The "G ... + query writing + 1 search" rows in the tables are these defaults. After making them the defaults I re-ran both models and the per-question hit/miss outcomes and retrieval metrics matched. LLM calls dropped from the 4.0 shown in the tables to 3.0 because grading is skipped at the search cap.)
+**What the results show**
 
-> ⚠️ **This is 15 questions, one run per variant; a one-question difference (0.07) can't be called a real difference,** Plain mode and the hand-built agent run query writing and reranking at temperature 0. When I re-ran both models with the new defaults, the per-question hit/miss outcomes and the retrieval metrics (hit_rate etc.) matched, and so did the retrieved reports themselves, except for one 7B agent question (QA-001, a miss both times). Temperature 0 does not guarantee an exact repeat. What does vary is answer generation (citation rate, judge) and the stock LangChain agent's search (its tool query is written by the LLM at temperature 0.2 each time, so the same question (QA-001) sometimes found the gold report and sometimes didn't; I observed this across several runs I stopped partway, and only the last run's result is saved, so the numbers do not back this point up). That retrieval reproduces does not mean a different question set would give the same result; read this as a trend on these 15 questions. I also tried Gemma 4 26B (MoE, a thinking model), but thinking inflated the output tokens to about 174 s per question, so I cut it off midway and left it out of the comparison.
+- **What helped was not "searching again" but "rewriting the question into a search query" (7B)**
+  - With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73
+  - Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. Cross-department questions also rose from 0.40 to 0.80
+  - Where it helps, step by step (7B; details in the [worked example](docs/worked_example_en.md))
+    - Questions with the gold report in BM25's top 5: 11 → 15
+    - Vector search alone: 5 → 5 in total (four questions swapped in and out)
+    - The rewritten query goes to both searches at once, so the final gain can't be credited to BM25 alone
+    - The 20 reranking candidates already contained the gold report for all 15 questions before rewriting
+    - The final gain (9 → 14–15) came from both how candidates were collected (9 → 15) and which query was used to rerank (9 → 12)
+    - Explanations such as "a short query is easier for the reranking LLM to judge" are unconfirmed
+- **This breakdown was prompted by losing to the stock LangChain agent**
+  - It reached 0.93 without searching more
+  - Looking into it, the LLM rewrote the question into a keyword-style query before every search, while my G used the question as is on the first search
+  - My original hypothesis ("re-search makes up for it") was only half right
+- **With 32B, none of the tweaks shows a clear effect**
+  - Plain mode was already at 0.87; query writing + 1 search reached 0.93 (one question)
+  - Cross-department dropped from 1.00 to 0.80 (one question), and to 0.60 once re-search was added
+- **Conclusion: plain mode stays the default answer mode; the agent is an option for when you have to use a small model**
+  - The agent's defaults are the best-measured `first_query = "rewrite"` with `max_attempts = 1` (the "query writing + 1 search" rows)
+  - The re-search loop is available by raising `max_attempts`, but it showed no benefit on top of query writing with either model
+  - With larger models there was no difference from plain mode and cross-department questions tended to drop, so use plain mode
+  - After making these the defaults, I re-ran both models; per-question hit/miss and metrics such as hit_rate matched. LLM calls dropped from the 4.0 in the table to 3.0 because grading is skipped at the cap
+
+> ⚠️ **This is 15 questions, one run per variant. A one-question difference (0.07) can't be called real; read the results as a trend on these 15 questions.**
+>
+> - Plain mode and the hand-built agent run query writing and reranking at temperature 0. Re-running both models with the new defaults gave matching per-question hit/miss and retrieval metrics
+> - The retrieved reports themselves also matched, except for one 7B agent question (QA-001, a miss both times). Temperature 0 does not guarantee an exact repeat
+> - What does vary: answer generation (citation rate, judge) and the stock LangChain agent's search
+>   - Its tool query is written by the LLM at temperature 0.2 each time, so the same question (QA-001) sometimes found the gold report and sometimes didn't
+>   - I observed this across several runs I stopped partway; only the last run's result is saved, so the numbers don't back this point up
+> - That retrieval reproduces doesn't mean a different question set would give the same result
+> - I also tried Gemma 4 26B (MoE, a thinking model), but thinking inflated output to about 174 s per question, so I cut it off midway and left it out of the comparison
 
 ### Problems found along the way
 
-- **Three findings from the independent review (codex):** (1) CI didn't install the optional dependency, so the new tests couldn't be collected; (2) a retry returning `top_k` chunks pushed out all earlier evidence; (3) the grading prompt had no conversation history, so follow-up questions couldn't be graded. Each was reproduced with a mock, fixed, and given a regression test.
-- **Three findings from running it against a real LLM (7B):** (1) grading was so strict it retried up to the cap every time; (2) rewritten queries included the asker's own department, biasing search toward it; (3) interleaving the retries' results pushed out a gold report the original query had found (fixed by the `select` node, which reranks everything collected against the original question). Mock-based tests alone didn't surface these.
-- **A design mistake found by the evaluation:** the original hypothesis that "re-search helps" was only half right. What helped was how the first query was written (above).
+- **Three findings from the independent review (codex)**: (1) CI didn't install the optional dependency, so the new tests couldn't be collected; (2) a retry returning `top_k` chunks pushed out all earlier evidence; (3) the grading prompt had no conversation history, so follow-up questions couldn't be graded. Each was reproduced with a mock, fixed, and given a regression test
+- **Three findings from running a real LLM (7B)** (mock-based tests alone didn't surface these)
+  - Grading was so strict it retried up to the cap every time
+  - Rewritten queries included the asker's own department, biasing search toward it
+  - Interleaving the retries' results pushed out a gold report the original query had found (fixed by the `select` node, which reranks everything collected against the original question)
+- **A design mistake found by the evaluation**: the original hypothesis that "re-search helps" was only half right. What helped was how the first query was written
 
 ## Node H: LangChain integration
 
-`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). Like node G, it only calls the public functions of C and D and doesn't touch their insides.
+`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). It calls functions from C and D (unlike G, it also uses D's private `_build_citations`).
 
-1. **`SiloRetriever`**: exposes the existing hybrid search (`search()`) as a LangChain Retriever (`BaseRetriever` from `langchain_core`). The search internals (BM25 + vectors + LLM reranking) are unchanged, and it can be used as a component from LangChain chains and agents.
-2. **`run_langchain_agent`**: uses that Retriever as a search tool for LangChain's stock `create_agent` (the LLM searches through tool calling) and answers with it. It is the comparison target for the hand-built node G, with the same answer policy and a search cap of 3 (a constant, independent of G's `max_attempts` default — making G's default 1 doesn't restrict the stock agent to one search).
-
-LLM calls go through the existing `LLMClient` for things like in-search reranking and through `ChatOpenAI` for the agent's own decisions — both pointed at the local LM Studio (`config.ai.base_url`) — so the zero-external-transmission policy is unchanged. Evaluate it with `python -m silo_rag.eval --pipeline langchain`.
-The result is the 7B table above (hit_rate 0.93, citation rate 0.87). Its retrieval metrics are computed over every chunk the tool returned, so more searches favor it (it surfaced 4.5 reports on average versus 4.0 for plain mode — a small gap); citation rate and judge compare fairly.
+- **`SiloRetriever`**: exposes the existing hybrid search (`search()`) as a LangChain Retriever (`BaseRetriever` from `langchain_core`)
+  - The search internals (BM25 + vectors + LLM reranking) are unchanged
+  - It can be used as a component in LangChain chains and agents
+- **`run_langchain_agent`**: uses that Retriever as a search tool for LangChain's stock `create_agent` (the LLM searches through tool calling). It is the comparison target for the hand-built node G
+  - The search cap is 3, a constant independent of G's `max_attempts`; making G's default 1 doesn't limit the stock agent to one search
+- LLM calls use the existing `LLMClient` (reranking and other in-search work) and `ChatOpenAI` (the agent's own decisions), both pointed at the local LM Studio (`config.ai.base_url`). Zero external transmission is unchanged
+- Evaluate it with `python -m silo_rag.eval --pipeline langchain`. The result is in the 7B table above (hit_rate 0.93, citation rate 0.87)
+  - Its retrieval metrics are computed over every chunk the tool returned, so more searches favor it (4.5 reports on average versus 4.0 for plain mode, a small gap)
+  - Citation rate and judge compare fairly
 
 ### What running the stock agent on a small model showed
 
-- **Parallel tool calls broke search.** When the LLM calls the search tool several times in one response, LangGraph runs them concurrently on threads. `search()` assumes a single thread, and failed on both ChromaDB (the same folder opened concurrently) and LM Studio (concurrent embedding requests → HTTP 500). `SiloRetriever` now runs searches one at a time.
-- **One response tried to call the search tool about 50 times at once (282 s).** LangGraph's step limit (`recursion_limit`) only counts how many times the model re-thinks, not parallel calls within one response. `SiloRetriever` now caps how many searches it actually runs.
-- Neither showed up in mock-based tests; both appeared only when I ran a real 7B model.
+Neither problem appeared in mock-based tests; both showed up only when I ran a real 7B model.
+
+- **Parallel tool calls broke search**
+  - When the LLM calls the search tool several times in one response, LangGraph runs them concurrently on threads
+  - `search()` assumes a single thread, and failed on both ChromaDB (the same folder opened concurrently) and LM Studio (concurrent embedding requests → HTTP 500)
+  - `SiloRetriever` now runs searches one at a time
+- **One response tried to call the search tool about 50 times at once (282 s)**
+  - LangGraph's step limit (`recursion_limit`) only counts how many times the model re-thinks, not parallel calls within one response
+  - `SiloRetriever` now caps how many searches it actually runs
 
 ## License
 
