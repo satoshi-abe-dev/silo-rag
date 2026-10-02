@@ -198,15 +198,18 @@ C (retrieval) combines two searches of different kinds.
   3. Long documents are discounted a little, since words are more likely to turn up in them.
 
   It is good at searches where **the words themselves match** — part numbers, proper nouns, technical terms. It is weak at
-  treating a paraphrase ("budget" vs. "cost estimate") as the same thing, and its score gets scattered when the question
-  contains a lot of words unrelated to the search.
+  treating a paraphrase ("budget" vs. "cost estimate") as the same thing, and when the question contains words unrelated
+  to the search, they raise the score of any document that happens to contain them, which can shift the ranking (a word that
+  is not in the index at all scores zero and changes nothing).
 - **Vector search**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
   measures whether the **meaning is close**. It handles paraphrases well.
 - **Combined**: the two scores are blended with `vector_weight` (0.5 by default), and an LLM reranks the top candidates.
-- **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing simply cuts the text into two-character
-  pieces (no morphological analyzer; for example "予算策定" → "予算", "算策", "策定"). It uses `BM25Plus` from the
-  `rank_bm25` library. `BM25Okapi` can give a negative score to a word that appears in at least half the documents, which
-  genuinely happens on a small corpus, so it was replaced with `BM25Plus`, which stays positive.
+- **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing is deliberately simple (no
+  morphological analyzer). Japanese text is cut into overlapping **two-character pieces** (for example "予算策定" → "予算",
+  "算策", "策定"), while ASCII words and IDs (such as `RPT-014`) are **kept whole and lowercased** (`rpt-014`). It uses
+  `BM25Plus` from the `rank_bm25` library. `BM25Okapi` can give a negative weight (IDF) to a word that appears in more than
+  half the documents, which genuinely happens on a small corpus, so it was replaced with `BM25Plus`, whose weight for any
+  indexed word stays positive (a query made only of words absent from the index scores zero under either).
 
 ### What a "node" actually is
 
