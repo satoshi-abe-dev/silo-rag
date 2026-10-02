@@ -159,22 +159,23 @@ streamlit run src/silo_rag/app.py
 ```mermaid
 graph LR
     A["A datagen<br/>合成データ生成"] --> B["B ingest<br/>チャンキング・埋め込み"]
-    B --> C["C retrieval<br/>ハイブリッド検索・リランキング"]
+    B --> C["C retrieval<br/>検索・リランキング"]
     B --> D["D generation<br/>引用付き回答生成"]
     C --> E["E eval<br/>精度・品質評価"]
     D --> E
     E --> F["F app<br/>Streamlit UI"]
-    subgraph opt["オプション"]
-        G["G agent<br/>LangGraph"]
-        H["H langchain_adapter<br/>LangChain連携"]
-    end
-    C -.-> opt
-    D -.-> opt
-    opt -.-> E
-    G -.-> F
 ```
 
-実線は必須の依存、点線はオプション（G・H）の依存を表す。
+オプションのノードG・Hは、C・Dの上に載り、EやFから使われる。メインフローの外にあるので、別の図に分けた。
+
+```mermaid
+graph LR
+    CD["C retrieval<br/>D generation"] -.-> G["G agent<br/>LangGraph"]
+    CD -.-> H["H langchain_adapter<br/>LangChain連携"]
+    G -.-> E["E eval"]
+    G -.-> F["F app"]
+    H -.-> E
+```
 
 | ノード | モジュール | 役割 | 使用モデル（`config.toml`の`[ai]`） |
 | --- | --- | --- | --- |
