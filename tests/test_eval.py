@@ -150,7 +150,7 @@ def test_run_eval_agent_uses_agent_result(monkeypatch):
 
     captured = {}
 
-    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None):
+    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None, max_attempts=None):
         captured["grade_mode"] = grade_mode
         captured["first_query"] = first_query
         for _ in range(5):
@@ -234,7 +234,7 @@ def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
     import silo_rag.langchain_adapter as adapter
     from silo_rag.langchain_adapter import LangChainAgentResult
 
-    def fake_run(client, question, *, top_k=None):
+    def fake_run(client, question, *, top_k=None, max_searches=None):
         client.chat("rerank", "x")  # 検索内のリランキング（LLMClient経由。countingに数えられる）
         return LangChainAgentResult(
             answer=Answer(text="RPT-001を参考に", citations=[]),
@@ -274,3 +274,40 @@ def test_format_comparison_marks_single_search_runs():
     lines = format_comparison([("a", payload)]).splitlines()
 
     assert lines[2].startswith("| agent(lenient,rewrite-first,1-search) / qwen-7b |")
+
+
+def test_run_eval_passes_max_attempts_to_agent_and_langchain(monkeypatch):
+    import silo_rag.agent as agent_module
+    import silo_rag.langchain_adapter as adapter
+    from silo_rag.agent import AgentResult
+    from silo_rag.langchain_adapter import LangChainAgentResult
+
+    seen = {}
+
+    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None, max_attempts=None):
+        seen["agent"] = max_attempts
+        return AgentResult(
+            answer=Answer(text="RPT-001", citations=[]),
+            scored_chunks=[_scored("RPT-001")],
+            tried_queries=["q"],
+            attempts=1,
+            trace=[],
+        )
+
+    def fake_run_langchain(client, question, *, top_k=None, max_searches=None):
+        seen["langchain"] = max_searches
+        return LangChainAgentResult(
+            answer=Answer(text="RPT-001", citations=[]),
+            scored_chunks=[_scored("RPT-001")],
+            searches=1,
+            requested_searches=1,
+            llm_calls=2,
+        )
+
+    monkeypatch.setattr(agent_module, "run_agent", fake_run_agent)
+    monkeypatch.setattr(adapter, "run_langchain_agent", fake_run_langchain)
+
+    run_eval(_JudgeClient(), _QA, pipeline="agent", max_attempts=1)
+    run_eval(_JudgeClient(), _QA, pipeline="langchain", max_attempts=2)
+
+    assert seen == {"agent": 1, "langchain": 2}

@@ -151,12 +151,15 @@ def run_eval(
     pipeline: str = "baseline",
     grade_mode: str | None = None,
     first_query: str | None = None,
+    max_attempts: int | None = None,
     judge_model: str | None = None,
 ) -> list[QAResult]:
     """pipeline: "baseline"（search→answer_questionを直接呼ぶ）、"agent"（agent.run_agent）、
         "langchain"（langchain_adapter.run_langchain_agent。LLMのツール呼び出しで検索する既製エージェント）。
     grade_mode: agentの判定の厳しさ。Noneならconfig.agent.grade_mode。
     first_query: agentの1回目の検索クエリ（"raw"／"rewrite"）。Noneならconfig.agent.first_query。
+    max_attempts: agent・langchainの検索の上限回数。Noneなら、agentはconfig.agent.max_attempts、
+        langchainはlangchain_adapter.DEFAULT_MAX_SEARCHES。
     judge_model: LLM-as-judgeの採点に使うモデル。Noneならconfig.ai.llm_model（回答と同じモデル）。
         回答モデルを変えて比較するときは、採点モデルを固定しないとjudgeスコアが比べられない。
     """
@@ -178,7 +181,7 @@ def run_eval(
         extra_llm_calls = 0  # countingを通らないLLM呼び出し（langchainエージェント自身の判断）
         started = time.perf_counter()
         if pipeline == "langchain":
-            lc_result = run_langchain_agent(counting, qa["question"], top_k=top_k)
+            lc_result = run_langchain_agent(counting, qa["question"], top_k=top_k, max_searches=max_attempts)
             scored, answer, attempts = lc_result.scored_chunks, lc_result.answer, lc_result.searches
             extra_llm_calls = lc_result.llm_calls
         elif pipeline == "agent":
@@ -189,6 +192,7 @@ def run_eval(
                 top_k=top_k,
                 grade_mode=grade_mode,
                 first_query=first_query,
+                max_attempts=max_attempts,
             )
             scored, answer, attempts = agent_result.scored_chunks, agent_result.answer, agent_result.attempts
         else:
@@ -340,6 +344,12 @@ def main() -> None:
         help="agentの1回目の検索クエリ（質問そのまま／質問からLLMが作る）。Noneならconfig.agent.first_query",
     )
     parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=None,
+        help="agent・langchainの検索の上限回数。Noneなら、agentはconfig.agent.max_attempts、langchainは3回",
+    )
+    parser.add_argument(
         "--judge-model",
         default=None,
         help="LLM-as-judgeの採点モデル。Noneならconfig.ai.llm_model。回答モデルを変えて比べるときは固定する",
@@ -370,12 +380,22 @@ def main() -> None:
     is_agent = args.pipeline == "agent"
     grade_mode = (args.grade_mode or config.agent.grade_mode) if is_agent else None
     first_query = (args.first_query or config.agent.first_query) if is_agent else None
+    max_attempts: int | None = None
+    if is_agent:
+        max_attempts = args.max_attempts or config.agent.max_attempts
+    elif args.pipeline == "langchain":
+        from .langchain_adapter import DEFAULT_MAX_SEARCHES
+
+        max_attempts = args.max_attempts or DEFAULT_MAX_SEARCHES
     judge_model = args.judge_model or config.ai.llm_model
     out = args.out
     if out is None:
         names = {
             "baseline": "eval_results.json",
-            "agent": f"eval_results_agent_{grade_mode}{'_rewrite' if first_query == 'rewrite' else ''}.json",
+            "agent": (
+                f"eval_results_agent_{grade_mode}{'_rewrite' if first_query == 'rewrite' else ''}"
+                f"{'_1search' if max_attempts == 1 else ''}.json"
+            ),
             "langchain": "eval_results_langchain.json",
         }
         name = names[args.pipeline]
@@ -393,6 +413,7 @@ def main() -> None:
             pipeline=args.pipeline,
             grade_mode=grade_mode,
             first_query=first_query,
+            max_attempts=max_attempts,
             judge_model=judge_model,
         )
 
@@ -407,7 +428,7 @@ def main() -> None:
         "judge_model": judge_model,
         "grade_mode": grade_mode,
         "first_query": first_query,
-        "max_attempts": config.agent.max_attempts if args.pipeline in ("agent", "langchain") else None,
+        "max_attempts": max_attempts,
         "top_k": args.top_k if args.top_k is not None else config.retrieval.top_k_final,
     }
     payload = {"run": run, "summary": summary, "results": [asdict(r) for r in results]}

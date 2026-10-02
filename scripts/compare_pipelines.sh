@@ -4,7 +4,10 @@
 # 使い方（仮想環境を有効化した状態で）:
 #   bash scripts/compare_pipelines.sh                       # config.tomlのllm_modelで実行
 #   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct   # 回答モデルを指定して実行
-#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct --rewrite-first   # 1回目からクエリを作る版も追加
+#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct --rewrite-first   # 1回目からクエリを作る版（3種）も追加
+#
+# 実行ごとに、エージェントの設定（first_query・max_attempts）は明示している。config.tomlや環境変数の
+# 既定（クエリを作って1回検索する）に左右されず、毎回同じ条件で比べるため。
 #
 # 結果は data/eval/compare/<モデル名>/ に書き出す。別モデルの結果と並べるには:
 #   python -m silo_rag.eval --compare data/eval/compare/*/*.json
@@ -35,21 +38,27 @@ echo "=== 1/3: baseline ==="
 python -m silo_rag.eval --pipeline baseline --out "$OUT/baseline.json"
 
 echo "=== 2/3: agent (strict) ==="
-python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query raw --out "$OUT/agent_strict.json"
+python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query raw --max-attempts 3 \
+  --out "$OUT/agent_strict.json"
 
 echo "=== 3/3: agent (lenient) ==="
-python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query raw --out "$OUT/agent_lenient.json"
+python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query raw --max-attempts 3 \
+  --out "$OUT/agent_lenient.json"
 
 RESULTS=("$OUT/baseline.json" "$OUT/agent_strict.json" "$OUT/agent_lenient.json")
 
 if [[ $REWRITE_FIRST -eq 1 ]]; then
-  echo "=== 追加1/2: agent (strict, rewrite-first) ==="
-  python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query rewrite \
+  echo "=== 追加1/3: agent (strict, rewrite-first, 3 searches) ==="
+  python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query rewrite --max-attempts 3 \
     --out "$OUT/agent_strict_rewrite.json"
-  echo "=== 追加2/2: agent (lenient, rewrite-first) ==="
-  python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query rewrite \
+  echo "=== 追加2/3: agent (lenient, rewrite-first, 3 searches) ==="
+  python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query rewrite --max-attempts 3 \
     --out "$OUT/agent_lenient_rewrite.json"
-  RESULTS+=("$OUT/agent_strict_rewrite.json" "$OUT/agent_lenient_rewrite.json")
+  echo "=== 追加3/3: agent (lenient, rewrite-first, 1 search) ==="
+  python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query rewrite --max-attempts 1 \
+    --out "$OUT/agent_lenient_rewrite_1search.json"
+  RESULTS+=("$OUT/agent_strict_rewrite.json" "$OUT/agent_lenient_rewrite.json"
+            "$OUT/agent_lenient_rewrite_1search.json")
 fi
 
 echo

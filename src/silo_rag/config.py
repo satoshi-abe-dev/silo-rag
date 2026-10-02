@@ -81,14 +81,19 @@ class RetrievalConfig:
 
 @dataclass
 class AgentConfig:
-    # LangGraphエージェント（agent.py）が検索を繰り返す上限回数（初回の検索を含む）。
+    # 既定値（max_attempts=1, first_query="rewrite"）は、小さいモデル（7B）での測定で最も良かった組み合わせ
+    # （クエリを作って1回検索する）。再検索のループは、クエリ作成に上乗せする効果を、7B・32Bのどちらでも
+    # 確認できなかった。32Bでは通常方式と差が見えず、部署横断が1問下がったので、大きいモデルは通常方式を使う。
+    # README「ノードG」の評価を参照。
+    #
+    # LangGraphエージェント（agent.py）が検索を繰り返す上限回数（初回の検索を含む）。1なら再検索しない。
     # 「根拠が十分か」はLLMが判定するが、何回まで繰り返すかはここでコードが決める。
-    max_attempts: int = 3
+    max_attempts: int = 1
     # 「根拠が十分か」の判定の厳しさ。"strict" か "lenient"（agent.pyの_GRADE_SYSTEM_PROMPTS参照）。
     grade_mode: str = "lenient"
     # 1回目の検索に使うクエリ。"raw"＝質問そのまま、"rewrite"＝質問からLLMが作ったクエリ
     # （agent.pyのplanノード）。質問文の名乗りや依頼の言い回しがキーワード検索を散らすため。
-    first_query: str = "raw"
+    first_query: str = "rewrite"
 
 
 @dataclass
