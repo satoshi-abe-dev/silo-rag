@@ -408,3 +408,12 @@ def _llm_rerank(client: LLMClient, query: str, candidates: list[ScoredChunk]) ->
     included = set(order)
     reranked.extend(scored for i, scored in enumerate(candidates, start=1) if i not in included)
     return reranked
+
+
+def rerank(client: LLMClient, query: str, candidates: list[ScoredChunk]) -> list[ScoredChunk]:
+    """候補チャンクを、queryへの関連度順にLLMで並べ替える（search()内のリランキングと同じ処理）。
+
+    search()の外で集めた候補（例: agent.pyが複数回の検索結果を合わせたもの）を、
+    元の質問で並べ直すための公開関数。失敗時は入力の順序のまま返す。
+    """
+    return _llm_rerank(client, query, candidates)

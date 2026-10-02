@@ -27,6 +27,13 @@ dependencies = [
 [project.optional-dependencies]
 # `pip install -e ".[dev]"` でテスト・lintツールも含めて導入する。
 dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
+# `pip install -e ".[agent]"` でLangGraph版エージェント（src/silo_rag/agent.py）を使えるようにする。
+# baselineだけ使う場合は不要。langchain-coreもlanggraphの依存として一緒に入る。
+agent = ["langgraph>=1.0"]
+# `pip install -e ".[langchain]"` でLangChain連携（src/silo_rag/langchain_adapter.py）を使えるようにする。
+# SiloRetriever（自前検索をLangChainのRetrieverにする）と、既製エージェント（create_agent）との比較用。
+# langchainはlanggraphに依存するので、agentのextraも一緒に入る。
+langchain = ["langchain>=1.0", "langchain-openai>=1.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

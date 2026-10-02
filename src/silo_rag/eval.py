@@ -7,6 +7,14 @@ retrieval→generationのRAGパイプライン全体を実行し、検索精度�
 部署をまたいだ設問（cross_dept=true）と自部署内の設問を分けて集計する。本プロジェクトの
 核となる価値提案（部署間の情報共有が不十分でも横断検索できること）が実際に機能しているか
 を、この内訳で確認できるようにするため。
+
+`--pipeline agent` を指定すると、retrieval→generationを直接呼ぶ代わりにLangGraphエージェント
+（agent.py、DAGノードG）で回答し、同じ指標で比較できる。`--pipeline langchain` は、LangChain既製の
+`create_agent`（LLMのツール呼び出しで検索する。langchain_adapter.py、ノードH）で回答する比較対象
+（検索系の指標は、ツールが返した全チャンクで計算するため、検索回数が多いほど有利になる。
+回答の引用率・judgeは公平に比べられる）。精度に加えて、1問あたりの時間・
+LLM呼び出し回数・検索回数も記録する（エージェントはその分のコストを払うため）。
+`--compare` で、複数の結果ファイルを1つの比較表（Markdown）にまとめて表示できる。
 """
 
 from __future__ import annotations
@@ -14,11 +22,12 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .config import EVAL_DIR, load_config
-from .generation import answer_question
+from .generation import Answer, answer_question
 from .llm_client import LLMClient
 from .retrieval import ScoredChunk, search
 
@@ -36,6 +45,10 @@ class QAResult:
     answer_text: str
     cited_gold: bool
     judge_score: int | None
+    # コスト指標。llm_callsは回答までのchat呼び出し回数（埋め込み・judgeの採点は含まない）。
+    attempts: int = 1  # 検索回数（baselineは常に1）
+    llm_calls: int = 0
+    elapsed_sec: float = 0.0
 
 
 def _load_qa_pairs(path: Path) -> list[dict]:
@@ -72,7 +85,32 @@ _JUDGE_SYSTEM = (
 )
 
 
-def _judge_answer(client: LLMClient, question: str, gold_evidence: list[str], answer_text: str) -> int | None:
+PIPELINES = ("baseline", "agent", "langchain")
+
+
+class _CountingClient:
+    """LLMClientを包み、chatの呼び出し回数を数える（それ以外の属性は本物にそのまま任せる）。"""
+
+    def __init__(self, inner: LLMClient):
+        self._inner = inner
+        self.chat_calls = 0
+
+    def chat(self, *args, **kwargs) -> str:
+        self.chat_calls += 1
+        return self._inner.chat(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _judge_answer(
+    client: LLMClient,
+    question: str,
+    gold_evidence: list[str],
+    answer_text: str,
+    *,
+    model: str | None = None,
+) -> int | None:
     """簡易LLM-as-judge。応答が解釈できない場合はNone（judge_score_countから除外され、
     平均スコアの計算対象にもならない。サーバー障害等で評価プロセス全体を止めないため、
     ここでのLLM呼び出し失敗は握りつぶしてNoneを返す）。"""
@@ -88,7 +126,7 @@ def _judge_answer(client: LLMClient, question: str, gold_evidence: list[str], an
         # 可視の回答を書く前に思考トークンを消費するため、ここで小さい値を決め打ちすると
         # 思考だけで使い切り、LLMClient側の「本文が空」検出でエラーになり得る
         # （すべての評価がNoneになりかねない）。
-        raw = client.chat(_JUDGE_SYSTEM, user, temperature=0.0)
+        raw = client.chat(_JUDGE_SYSTEM, user, model=model, temperature=0.0)
     except Exception:
         return None
     # 応答を1〜5の整数「1文字だけ」として厳密に検証する。単純に`[1-5]`を本文中から
@@ -99,27 +137,79 @@ def _judge_answer(client: LLMClient, question: str, gold_evidence: list[str], an
     return int(stripped) if stripped in {"1", "2", "3", "4", "5"} else None
 
 
-def run_eval(client: LLMClient, qa_pairs: list[dict], top_k: int | None = None) -> list[QAResult]:
+def _answer_baseline(client, question: str, top_k: int | None) -> tuple[list[ScoredChunk], Answer, int]:
+    scored = search(client, question, top_k=top_k)
+    answer = answer_question(client, question, [sc.chunk for sc in scored])
+    return scored, answer, 1
+
+
+def run_eval(
+    client: LLMClient,
+    qa_pairs: list[dict],
+    top_k: int | None = None,
+    *,
+    pipeline: str = "baseline",
+    grade_mode: str | None = None,
+    first_query: str | None = None,
+    max_attempts: int | None = None,
+    judge_model: str | None = None,
+) -> list[QAResult]:
+    """pipeline: "baseline"（search→answer_questionを直接呼ぶ）、"agent"（agent.run_agent）、
+        "langchain"（langchain_adapter.run_langchain_agent。LLMのツール呼び出しで検索する既製エージェント）。
+    grade_mode: agentの判定の厳しさ。Noneならconfig.agent.grade_mode。
+    first_query: agentの1回目の検索クエリ（"raw"／"rewrite"）。Noneならconfig.agent.first_query。
+    max_attempts: agent・langchainの検索の上限回数。Noneなら、agentはconfig.agent.max_attempts、
+        langchainはlangchain_adapter.DEFAULT_MAX_SEARCHES。
+    judge_model: LLM-as-judgeの採点に使うモデル。Noneならconfig.ai.llm_model（回答と同じモデル）。
+        回答モデルを変えて比較するときは、採点モデルを固定しないとjudgeスコアが比べられない。
+    """
+    if pipeline not in PIPELINES:
+        raise ValueError(f"pipelineは{PIPELINES}のいずれかを指定してください: {pipeline!r}")
+    # langgraph・langchainは任意依存（.[agent]・.[langchain]）。baselineだけ使う環境ではimportしない。
+    if pipeline == "agent":
+        from .agent import run_agent
+    elif pipeline == "langchain":
+        from .langchain_adapter import run_langchain_agent
+
     results: list[QAResult] = []
     for qa in qa_pairs:
         gold_refs = qa["gold_references"]
         gold_ids = {r["report_id"] for r in gold_refs}
         gold_evidence = [r["evidence"] for r in gold_refs]
 
-        scored = search(client, qa["question"], top_k=top_k)
+        counting = _CountingClient(client)
+        extra_llm_calls = 0  # countingを通らないLLM呼び出し（langchainエージェント自身の判断）
+        started = time.perf_counter()
+        if pipeline == "langchain":
+            lc_result = run_langchain_agent(counting, qa["question"], top_k=top_k, max_searches=max_attempts)
+            scored, answer, attempts = lc_result.scored_chunks, lc_result.answer, lc_result.searches
+            extra_llm_calls = lc_result.llm_calls
+        elif pipeline == "agent":
+            # _CountingClientはLLMClientの代わりに渡せる（chat以外は本物に任せる）が、型は別。
+            agent_result = run_agent(
+                counting,  # type: ignore[arg-type]
+                qa["question"],
+                top_k=top_k,
+                grade_mode=grade_mode,
+                first_query=first_query,
+                max_attempts=max_attempts,
+            )
+            scored, answer, attempts = agent_result.scored_chunks, agent_result.answer, agent_result.attempts
+        else:
+            scored, answer, attempts = _answer_baseline(counting, qa["question"], top_k)
+        elapsed = time.perf_counter() - started
+
         retrieved_report_ids = _dedup_report_ids(scored)
         matched_gold = gold_ids & set(retrieved_report_ids)
         hit = bool(matched_gold)
         recall = len(matched_gold) / len(gold_ids) if gold_ids else 0.0
         rr = _reciprocal_rank(retrieved_report_ids, gold_ids)
 
-        chunks = [sc.chunk for sc in scored]
-        answer = answer_question(client, qa["question"], chunks)
         # answer.citationsは検索されたchunks全件から機械的に作られるため、実際に生成された
         # 回答本文がgoldレポートIDを引用しているかは別途、本文への部分一致で判定する
         # （generation.pyのプロンプトはreport_idをそのまま本文に埋め込ませる設計）。
         cited_gold = any(rid in answer.text for rid in gold_ids)
-        judge_score = _judge_answer(client, qa["question"], gold_evidence, answer.text)
+        judge_score = _judge_answer(client, qa["question"], gold_evidence, answer.text, model=judge_model)
 
         result = QAResult(
             qa_id=qa["qa_id"],
@@ -133,9 +223,15 @@ def run_eval(client: LLMClient, qa_pairs: list[dict], top_k: int | None = None) 
             answer_text=answer.text,
             cited_gold=cited_gold,
             judge_score=judge_score,
+            attempts=attempts,
+            llm_calls=counting.chat_calls + extra_llm_calls,
+            elapsed_sec=elapsed,
         )
         results.append(result)
-        print(f"{qa['qa_id']}: hit={hit} rr={rr:.2f} cited_gold={cited_gold} judge={judge_score}")
+        print(
+            f"{qa['qa_id']}: hit={hit} rr={rr:.2f} cited_gold={cited_gold} judge={judge_score} "
+            f"attempts={attempts} llm_calls={counting.chat_calls + extra_llm_calls} {elapsed:.1f}s"
+        )
     return results
 
 
@@ -150,6 +246,9 @@ def _summarize_subset(results: list[QAResult]) -> dict:
             "citation_rate": None,
             "avg_judge_score": None,
             "judge_score_count": 0,
+            "avg_attempts": None,
+            "avg_llm_calls": None,
+            "avg_elapsed_sec": None,
         }
     judge_scores = [r.judge_score for r in results if r.judge_score is not None]
     return {
@@ -164,6 +263,9 @@ def _summarize_subset(results: list[QAResult]) -> dict:
         "citation_rate": sum(r.cited_gold for r in results) / n,
         "avg_judge_score": statistics.mean(judge_scores) if judge_scores else None,
         "judge_score_count": len(judge_scores),
+        "avg_attempts": sum(r.attempts for r in results) / n,
+        "avg_llm_calls": sum(r.llm_calls for r in results) / n,
+        "avg_elapsed_sec": sum(r.elapsed_sec for r in results) / n,
     }
 
 
@@ -175,30 +277,190 @@ def summarize(results: list[QAResult]) -> dict:
     }
 
 
+_COMPARE_COLUMNS: list[tuple[str, str, str]] = [
+    # (見出し, summaryのサブセット, 指標キー)
+    ("hit_rate", "overall", "hit_rate"),
+    ("recall@k", "overall", "recall_at_k"),
+    ("MRR", "overall", "mrr"),
+    ("引用率", "overall", "citation_rate"),
+    ("judge", "overall", "avg_judge_score"),
+    ("横断hit", "cross_dept", "hit_rate"),
+    ("自部署hit", "same_dept", "hit_rate"),
+    ("検索回数", "overall", "avg_attempts"),
+    ("LLM回数", "overall", "avg_llm_calls"),
+    ("秒/問", "overall", "avg_elapsed_sec"),
+]
+
+
+def _positive_int(text: str) -> int:
+    """argparse用。検索の上限回数は1以上の整数だけを受け付ける（0や負の値を黙って丸めない）。"""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"整数を指定してください: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"1以上の整数を指定してください: {value}")
+    return value
+
+
+def _resolve_max_attempts(pipeline: str, requested: int | None, configured: int) -> int | None:
+    """検索の上限回数を決める。指定がない（None）ときだけ、設定（agent）か既定の定数（langchain）を使う。
+
+    `requested or configured`と書くと、指定した値が偽（0）のときに設定へフォールバックしてしまうので、
+    Noneかどうかで判定する。baselineは検索を繰り返さないのでNone。
+    """
+    if pipeline == "baseline":
+        return None
+    if requested is not None:
+        return requested
+    if pipeline == "langchain":
+        from .langchain_adapter import DEFAULT_MAX_SEARCHES
+
+        return DEFAULT_MAX_SEARCHES
+    return configured
+
+
+def _default_result_name(
+    pipeline: str, grade_mode: str | None, first_query: str | None, max_attempts: int | None
+) -> str:
+    """--outを省略したときの結果ファイル名。条件が違う実行が上書きし合わないよう、上限回数も入れる。"""
+    if pipeline == "baseline":
+        return "eval_results.json"
+    if pipeline == "langchain":
+        return f"eval_results_langchain_max{max_attempts}.json"
+    rewrite = "_rewrite" if first_query == "rewrite" else ""
+    return f"eval_results_agent_{grade_mode}{rewrite}_max{max_attempts}.json"
+
+
+def _run_label(payload: dict, fallback: str) -> str:
+    run = payload.get("run")
+    if not run:
+        return fallback  # runメタデータが無い（この機能より前の）結果ファイル
+    detail: list[str] = []
+    if run.get("grade_mode"):
+        detail.append(run["grade_mode"])
+    if run.get("first_query") == "rewrite":
+        detail.append("rewrite-first")  # 質問そのまま（raw）の実行には印を付けない
+    if run.get("max_attempts") is not None:
+        # 検索の上限回数。違う上限の実行が、同じ名前になって区別できなくならないよう、必ず出す。
+        detail.append(f"max={run['max_attempts']}")
+    label = run["pipeline"] + (f"({','.join(detail)})" if detail else "")
+    return f"{label} / {run['llm_model']}"
+
+
+def format_comparison(payloads: list[tuple[str, dict]]) -> str:
+    """複数の評価結果（(ファイル名, 中身)のリスト）を、Markdownの比較表にする。"""
+    header = "| 実行 | " + " | ".join(col for col, _, _ in _COMPARE_COLUMNS) + " |"
+    lines = [header, "|" + " --- |" * (len(_COMPARE_COLUMNS) + 1)]
+    for name, payload in payloads:
+        summary = payload.get("summary", {})
+        cells = []
+        for _, subset, key in _COMPARE_COLUMNS:
+            value = summary.get(subset, {}).get(key)
+            cells.append("-" if value is None else f"{value:.2f}")
+        lines.append(f"| {_run_label(payload, name)} | " + " | ".join(cells) + " |")
+    judge_models = {p["run"]["judge_model"] for _, p in payloads if p.get("run")}
+    if len(judge_models) > 1:
+        lines.append("")
+        lines.append(
+            f"注意: 採点モデルが実行ごとに異なるため、judgeの値は比べられない（{sorted(judge_models)}）。"
+        )
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="RAGパイプラインの評価（検索精度・回答品質）")
     parser.add_argument("--qa-file", type=Path, default=EVAL_DIR / "qa_pairs.json")
     parser.add_argument("--top-k", type=int, default=None, help="Noneならconfig.retrieval.top_k_finalを使う")
-    parser.add_argument("--out", type=Path, default=EVAL_DIR / "eval_results.json")
+    parser.add_argument("--pipeline", choices=list(PIPELINES), default="baseline")
+    parser.add_argument(
+        "--grade-mode",
+        choices=["strict", "lenient"],
+        default=None,
+        help="agentの判定の厳しさ。Noneならconfig.agent.grade_mode",
+    )
+    parser.add_argument(
+        "--first-query",
+        choices=["raw", "rewrite"],
+        default=None,
+        help="agentの1回目の検索クエリ（質問そのまま／質問からLLMが作る）。Noneならconfig.agent.first_query",
+    )
+    parser.add_argument(
+        "--max-attempts",
+        type=_positive_int,
+        default=None,
+        help="agent・langchainの検索の上限回数。Noneなら、agentはconfig.agent.max_attempts、langchainは3回",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="LLM-as-judgeの採点モデル。Noneならconfig.ai.llm_model。回答モデルを変えて比べるときは固定する",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="既定は eval_results.json（baseline）、eval_results_agent_<grade_mode>[_rewrite]_max<N>.json"
+        "（agent）、eval_results_langchain_max<N>.json（langchain）",
+    )
+    parser.add_argument(
+        "--compare",
+        type=Path,
+        nargs="+",
+        metavar="RESULT_JSON",
+        help="評価は実行せず、指定した結果ファイル群の比較表（Markdown）を表示する",
+    )
     args = parser.parse_args()
+
+    if args.compare:
+        payloads = [(path.stem, json.loads(path.read_text(encoding="utf-8"))) for path in args.compare]
+        print(format_comparison(payloads))
+        return
 
     qa_pairs = _load_qa_pairs(args.qa_file)
     config = load_config()
+    is_agent = args.pipeline == "agent"
+    grade_mode = (args.grade_mode or config.agent.grade_mode) if is_agent else None
+    first_query = (args.first_query or config.agent.first_query) if is_agent else None
+    max_attempts = _resolve_max_attempts(args.pipeline, args.max_attempts, config.agent.max_attempts)
+    judge_model = args.judge_model or config.ai.llm_model
+    out = args.out
+    if out is None:
+        out = EVAL_DIR / _default_result_name(args.pipeline, grade_mode, first_query, max_attempts)
+
     with LLMClient(config.ai) as client:
         if not client.ping():
             raise SystemExit(
                 f"LM Studio ({config.ai.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
-        results = run_eval(client, qa_pairs, top_k=args.top_k)
+        results = run_eval(
+            client,
+            qa_pairs,
+            top_k=args.top_k,
+            pipeline=args.pipeline,
+            grade_mode=grade_mode,
+            first_query=first_query,
+            max_attempts=max_attempts,
+            judge_model=judge_model,
+        )
 
     summary = summarize(results)
     print("\n=== summary ===")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"summary": summary, "results": [asdict(r) for r in results]}
-    args.out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"\n結果を書き出しました: {args.out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run = {
+        "pipeline": args.pipeline,
+        "llm_model": config.ai.llm_model,
+        "judge_model": judge_model,
+        "grade_mode": grade_mode,
+        "first_query": first_query,
+        "max_attempts": max_attempts,
+        "top_k": args.top_k if args.top_k is not None else config.retrieval.top_k_final,
+    }
+    payload = {"run": run, "summary": summary, "results": [asdict(r) for r in results]}
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"\n結果を書き出しました: {out}")
 
 
 if __name__ == "__main__":
