@@ -138,16 +138,11 @@ graph LR
     E --> F["F app<br/>Streamlit UI"]
 ```
 
-The optional nodes G and H build on C and D and are used by E and F. They sit outside the main flow, so they get their own diagram.
+The optional nodes G and H sit outside the main flow, so they are not in the diagram.
 
-```mermaid
-graph LR
-    CD["C retrieval<br/>D generation"] -.-> G["G agent<br/>LangGraph"]
-    CD -.-> H["H langchain_adapter<br/>LangChain integration"]
-    G -.-> E["E eval"]
-    G -.-> F["F app"]
-    H -.-> E
-```
+- **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). E (`--pipeline agent`) and F (the "agent" answer mode) call it only when selected
+- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `_build_citations` (a private function). E calls it only with `--pipeline langchain`
+- Both are imported only when used. Plain mode works without LangGraph or LangChain installed
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
 | --- | --- | --- | --- |
@@ -201,7 +196,7 @@ C combines two searches of different kinds.
 - **B → C/D**: through ChromaDB. C and D import only the `Chunk` type (`from .ingest import Chunk`)
 - **C/D → E/F**: direct function calls (`eval.py` and `app.py` call `search()` / `answer_question()`)
 - **C/D → G → E/F**: G also just calls `search()` / `answer_question()` (and `rerank()`). E and F can switch between plain mode and G
-- **C/D → H → E**: H also calls only public functions. E calls it via `--pipeline langchain` (for comparison)
+- **C/D → H → E**: besides `search()`, H uses D's `Answer` and `_build_citations` (a private function). E calls it via `--pipeline langchain` (for comparison)
 - The stronger the dependency, the tighter the coupling (direct calls are tight; files and the DB are loose)
 
 ### Which nodes are independent
@@ -347,7 +342,7 @@ I didn't measure the 32B model with the stock LangChain agent (LM Studio's model
 
 ## Node H: LangChain integration
 
-`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). Like node G, it only calls the public functions of C and D.
+`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). It calls functions from C and D (unlike G, it also uses D's private `_build_citations`).
 
 - **`SiloRetriever`**: exposes the existing hybrid search (`search()`) as a LangChain Retriever (`BaseRetriever` from `langchain_core`)
   - The search internals (BM25 + vectors + LLM reranking) are unchanged

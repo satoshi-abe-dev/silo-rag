@@ -138,16 +138,11 @@ graph LR
     E --> F["F app<br/>Streamlit UI"]
 ```
 
-オプションのノードG・Hは、C・Dの上に載り、EやFから使われる。メインフローの外にあるので、別の図に分けた。
+オプションのノードG・Hは、メインフローの外にあるので、図には含めない。
 
-```mermaid
-graph LR
-    CD["C retrieval<br/>D generation"] -.-> G["G agent<br/>LangGraph"]
-    CD -.-> H["H langchain_adapter<br/>LangChain連携"]
-    G -.-> E["E eval"]
-    G -.-> F["F app"]
-    H -.-> E
-```
+- **G**（`agent.py`）: C・Dの関数（`search`・`rerank`・`answer_question`）を呼ぶ。E（`--pipeline agent`）とF（回答方式「エージェント」）が、選ばれたときだけ呼ぶ
+- **H**（`langchain_adapter.py`）: Cの`search`と、Dの`Answer`・`_build_citations`（非公開の関数）を呼ぶ。Eが`--pipeline langchain`のときだけ呼ぶ
+- どちらも、使うときだけ`import`する。LangGraph・LangChainが入っていなくても、通常方式は動く
 
 | ノード | モジュール | 役割 | 使用モデル（`config.toml`の`[ai]`） |
 | --- | --- | --- | --- |
@@ -201,7 +196,7 @@ Cは、性質の違う2つの検索を組み合わせている。
 - **B→C・D**: ChromaDB経由。importするのは`Chunk`型だけ（`from .ingest import Chunk`）
 - **C・D→E・F**: 関数の直接呼び出し（`eval.py`・`app.py`が`search()`・`answer_question()`を呼ぶ）
 - **C・D→G→E・F**: Gも`search()`・`answer_question()`（と`rerank()`）を呼ぶだけ。E・Fは、通常方式かGかを切り替えられる
-- **C・D→H→E**: Hも公開関数だけを呼ぶ。Eが`--pipeline langchain`で呼ぶ（比較用）
+- **C・D→H→E**: Hは、`search()`のほかに、Dの`Answer`・`_build_citations`（非公開の関数）を使う。Eが`--pipeline langchain`で呼ぶ（比較用）
 - 依存が強いほど結合も強い（直接呼び出しは強く、ファイル・DB経由は疎結合）
 
 ### 独立なノードはどこか
@@ -347,7 +342,7 @@ graph TD
 
 ## ノードH：LangChain連携
 
-`src/silo_rag/langchain_adapter.py`（オプション。`pip install -e ".[langchain]"`）。ノードGと同じく、C・Dの公開関数だけを呼ぶ。
+`src/silo_rag/langchain_adapter.py`（オプション。`pip install -e ".[langchain]"`）。C・Dの関数を呼ぶ（Gと違い、Dの非公開関数`_build_citations`も使う）。
 
 - **`SiloRetriever`**: 自前のハイブリッド検索（`search()`）を、LangChainのRetriever（`langchain_core`の`BaseRetriever`）の規格に合わせて公開する
   - 検索の中身（BM25＋ベクトル＋LLMリランキング）はそのまま
