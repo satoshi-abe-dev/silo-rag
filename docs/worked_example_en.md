@@ -98,8 +98,8 @@ candidates.
    scores in between are rescaled proportionally into the 0–1 range. The formula is
    `(score − lowest) ÷ (highest − lowest)`. In the table, the keyword search's highest score, 123.8, becomes 1.00 and
    122.4 becomes 0.96; the semantic search's highest, -0.353, becomes 1.00 and -0.410 becomes 0.56. There are two
-   exceptions. (a) **If the highest and lowest scores differ by almost nothing (under 1e-12)** — the scores are essentially
-   all equal and the division is undefined — every chunk gets 1.00. (b) **If the keyword search's highest score is 0 or
+   exceptions. (a) **If the highest and lowest scores differ by almost nothing (under 1e-12)** — the scores are treated as
+   all equal — every chunk gets 1.00. (b) **If the keyword search's highest score is 0 or
    below** (no chunk matched any word), every chunk gets 0.00. (b) is checked before (a), so when every keyword-search score
    is 0, the chunks get 0.00, not 1.00, even though the scores are all equal.
 3. **Add the normalized scores, half and half.** The combined score is
