@@ -11,7 +11,7 @@
 > - The requirement to run everything on a local LLM with zero external transmission — a realistic constraint for business data that can be confidential
 > - The requirement to bring "graph engineering" into the development process. The concrete realization of that — decomposing work into DAG nodes, implementing independent nodes in parallel, and making an independent review from a different vendor's AI (the `codex` CLI) a required gate after each node — was AI's proposal
 >
-> Individual technical decisions — the hybrid retrieval pipeline design, the `BM25Okapi` → `BM25Plus` bug fix, citation-based verifiability, the eval split design — were likewise proposed by AI (Claude Code) and approved by the author after an independent review (codex). AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits.
+> Individual technical decisions — the hybrid retrieval pipeline design, the `BM25Okapi` → `BM25Plus` bug fix (BM25 is a keyword-search scoring formula; see [the explanation](#terms-bm25-and-vector-search)), citation-based verifiability, the eval split design — were likewise proposed by AI (Claude Code) and approved by the author after an independent review (codex). AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits.
 >
 > After implementation, the author ran the UI themselves and fed back the bugs and rough edges they noticed (chat turn ordering, the title wrapping, over-eager answers to off-topic input, no support for conversation-aware follow-up questions, etc.); the AI diagnosed and fixed each one.
 
@@ -177,7 +177,7 @@ graph LR
 | --- | --- | --- | --- |
 | A | `src/silo_rag/datagen.py` | - Generates dummy retrospective reports (house style and file format randomized per department; embeds an outcome chart)<br>- Generates gold-standard QA pairs | `llm_model` (report body generation) |
 | B | `src/silo_rag/ingest.py` | - Chunks by heading (5 formats supported)<br>- Captions embedded images with a VLM<br>- Vectorizes and stores in ChromaDB | - `embed_model` (chunk vectorization)<br>- `vlm_model` (outcome-chart captioning) |
-| C | `src/silo_rag/retrieval.py` | - BM25 + vector-similarity hybrid search<br>- LLM-based reranking<br>- Rewrites the query using conversation history | - `embed_model` (query vectorization)<br>- `llm_model` (reranking, query rewriting) |
+| C | `src/silo_rag/retrieval.py` | - [BM25](#terms-bm25-and-vector-search) + vector-similarity hybrid search<br>- LLM-based reranking<br>- Rewrites the query using conversation history | - `embed_model` (query vectorization)<br>- `llm_model` (reranking, query rewriting) |
 | D | `src/silo_rag/generation.py` | - Generates answers grounded in retrieved chunks<br>- Attaches citations (report ID, section, **department**)<br>- Resolves references using conversation history | `llm_model` (answer generation) |
 | E | `src/silo_rag/eval.py` | - Measures retrieval accuracy (Recall@k, MRR)<br>- Measures answer quality (LLM-as-judge, citation coverage) | - Every model used by C and D<br>- `llm_model` (LLM-as-judge scoring) |
 | F | `src/silo_rag/app.py` | - Streamlit chat UI<br>- Filter by department/type, citation display | Every model used by C and D (invoked on every question) |
@@ -185,6 +185,28 @@ graph LR
 | H (optional) | `src/silo_rag/langchain_adapter.py` | - Exposes the existing search as a LangChain Retriever<br>- Comparison against LangChain's stock agent<br>- Details: [Node H](#node-h-langchain-integration) | Every model used by C and D |
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged); every other node is unaffected.
+
+### Terms: BM25 and vector search
+
+C (retrieval) combines two searches of different kinds.
+
+- **BM25**: keyword search — a **formula** that scores each document by how often, and how distinctively, the words of the
+  question appear in it. It is not an AI model and involves no training. Three ideas set the score:
+  1. The more often a question word appears in a document, the higher the score (with diminishing returns).
+  2. A word that appears in almost every document (the Japanese equivalents of "is", "please") barely counts, while a
+     rare word (say, "budget planning") counts a lot.
+  3. Long documents are discounted a little, since words are more likely to turn up in them.
+
+  It is good at searches where **the words themselves match** — part numbers, proper nouns, technical terms. It is weak at
+  treating a paraphrase ("budget" vs. "cost estimate") as the same thing, and its score gets scattered when the question
+  contains a lot of words unrelated to the search.
+- **Vector search**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
+  measures whether the **meaning is close**. It handles paraphrases well.
+- **Combined**: the two scores are blended with `vector_weight` (0.5 by default), and an LLM reranks the top candidates.
+- **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing simply cuts the text into two-character
+  pieces (no morphological analyzer; for example "予算策定" → "予算", "算策", "策定"). It uses `BM25Plus` from the
+  `rank_bm25` library. `BM25Okapi` can give a negative score to a word that appears in at least half the documents, which
+  genuinely happens on a small corpus, so it was replaced with `BM25Plus`, which stays positive.
 
 ### What a "node" actually is
 
@@ -262,7 +284,7 @@ The LLM decides "is the evidence sufficient?" and "what query to try next"; the 
 - **Auxiliary decisions never stop the run.** If grading or rewriting hits an LLM connection error, malformed output, or a repeated query, it moves on to generation with the chunks in hand. A failure in generation itself still propagates to the caller as before.
 - **The zero-external-transmission policy is unchanged.** Every LLM call goes through the existing `LLMClient` (local LM Studio, etc.). LangGraph sends nothing externally unless you set LangSmith environment variables (`LANGSMITH_TRACING`, etc.).
 - **Grading strictness has two levels (`strict` / `lenient`).** The grading LLM can't know whether a better document exists that it hasn't seen yet, so which level is better isn't settled by prompt wording alone. `strict` retried up to the cap on most questions (8 of 9 gradings said "insufficient"); `lenient` says "sufficient" quickly. I kept both and compared them in the evaluation.
-- **You can choose whether the first search query is written from the question (`first_query`).** A question contains a lot that has nothing to do with search — a self-introduction ("This is the planning department."), request phrasing ("please tell me") — and it scatters BM25 (character bigrams). So I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself if that fails). In the evaluation this mattered most.
+- **You can choose whether the first search query is written from the question (`first_query`).** A question contains a lot that has nothing to do with search — a self-introduction ("This is the planning department."), request phrasing ("please tell me") — and I expected it to scatter BM25 ([explained here](#terms-bm25-and-vector-search); character bigrams). So I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself if that fails). In the evaluation this mattered most.
 - **Grading is skipped once the search cap is reached.** No further search is possible, so the verdict can't change anything.
 
 ### Evaluation
@@ -297,7 +319,7 @@ The judge uses the same model as the answerer, so **judge scores are only compar
 
 I didn't measure the 32B model with the stock LangChain agent (LM Studio's model list shows no tool-support icon for it).
 
-- **What helped was not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. The self-introduction and request phrasing in the question had been scattering BM25. Cross-department questions also rose from 0.40 to 0.80 (query writing + 1 search).
+- **What helped was not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. The self-introduction and request phrasing in the question were probably scattering BM25's scores (I did not isolate BM25 to confirm this; vector search and reranking may be affected too). Cross-department questions also rose from 0.40 to 0.80 (query writing + 1 search).
 - **This breakdown was prompted by losing to the stock LangChain agent.** It reached 0.93 without searching more. Looking into it, the LLM rewrote the question into a keyword-style query before every search, while my G used the question as is on the first search. My original hypothesis ("re-search makes up for it") was only half right.
 - **With 32B, none of the tweaks shows a clear effect.** Plain mode was already at 0.87; query writing + 1 search got 0.93 (one question). Cross-department dropped from 1.00 to 0.80 (one question), and to 0.60 once re-search was added.
 - **Conclusion: plain mode stays the default answer mode; the agent is an option for when you have to use a small model.** The agent's default settings are the best-measured `first_query = "rewrite"` with `max_attempts = 1` (write the query, search once). The re-search loop is still available by raising `max_attempts`, but it showed no benefit on top of query writing with either model. On 32B there was no difference from plain mode and cross-department questions tended to drop, so use plain mode with larger models. (The "G ... + query writing + 1 search" rows in the tables are these defaults. After making them the defaults I re-ran both models and the per-question hit/miss outcomes and retrieval metrics matched. LLM calls dropped from the 4.0 shown in the tables to 3.0 because grading is skipped at the search cap.)
