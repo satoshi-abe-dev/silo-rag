@@ -31,4 +31,7 @@ max_attempts = 3
 # 「根拠が十分か」の判定の厳しさ。"strict"（厳しめ。再検索が増える）か "lenient"（甘め）。
 grade_mode = "lenient"
 
+# 1回目の検索に使うクエリ。"raw"（質問そのまま）か "rewrite"（質問からLLMが検索クエリを作る）。
+first_query = "raw"
+
 # --------------------------------------

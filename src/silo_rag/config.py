@@ -86,6 +86,9 @@ class AgentConfig:
     max_attempts: int = 3
     # 「根拠が十分か」の判定の厳しさ。"strict" か "lenient"（agent.pyの_GRADE_SYSTEM_PROMPTS参照）。
     grade_mode: str = "lenient"
+    # 1回目の検索に使うクエリ。"raw"＝質問そのまま、"rewrite"＝質問からLLMが作ったクエリ
+    # （agent.pyのplanノード）。質問文の名乗りや依頼の言い回しがキーワード検索を散らすため。
+    first_query: str = "raw"
 
 
 @dataclass
@@ -108,6 +111,7 @@ _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "SILORAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
     "SILORAG_AGENT_MAX_ATTEMPTS": ("agent", "max_attempts", int),
     "SILORAG_AGENT_GRADE_MODE": ("agent", "grade_mode", str),
+    "SILORAG_AGENT_FIRST_QUERY": ("agent", "first_query", str),
 }
 
 _SECTION_TYPES = {

@@ -4,6 +4,7 @@
 # 使い方（仮想環境を有効化した状態で）:
 #   bash scripts/compare_pipelines.sh                       # config.tomlのllm_modelで実行
 #   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct   # 回答モデルを指定して実行
+#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct --rewrite-first   # 1回目からクエリを作る版も追加
 #
 # 結果は data/eval/compare/<モデル名>/ に書き出す。別モデルの結果と並べるには:
 #   python -m silo_rag.eval --compare data/eval/compare/*/*.json
@@ -15,8 +16,13 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-if [[ $# -ge 1 ]]; then
-  export SILORAG_AI_LLM_MODEL="$1"
+REWRITE_FIRST=0
+ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--rewrite-first" ]]; then REWRITE_FIRST=1; else ARGS+=("$arg"); fi
+done
+if [[ ${#ARGS[@]} -ge 1 ]]; then
+  export SILORAG_AI_LLM_MODEL="${ARGS[0]}"
 fi
 
 MODEL=$(python -c 'from silo_rag.config import load_config; print(load_config().ai.llm_model)')
@@ -29,11 +35,23 @@ echo "=== 1/3: baseline ==="
 python -m silo_rag.eval --pipeline baseline --out "$OUT/baseline.json"
 
 echo "=== 2/3: agent (strict) ==="
-python -m silo_rag.eval --pipeline agent --grade-mode strict --out "$OUT/agent_strict.json"
+python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query raw --out "$OUT/agent_strict.json"
 
 echo "=== 3/3: agent (lenient) ==="
-python -m silo_rag.eval --pipeline agent --grade-mode lenient --out "$OUT/agent_lenient.json"
+python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query raw --out "$OUT/agent_lenient.json"
+
+RESULTS=("$OUT/baseline.json" "$OUT/agent_strict.json" "$OUT/agent_lenient.json")
+
+if [[ $REWRITE_FIRST -eq 1 ]]; then
+  echo "=== 追加1/2: agent (strict, rewrite-first) ==="
+  python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query rewrite \
+    --out "$OUT/agent_strict_rewrite.json"
+  echo "=== 追加2/2: agent (lenient, rewrite-first) ==="
+  python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query rewrite \
+    --out "$OUT/agent_lenient_rewrite.json"
+  RESULTS+=("$OUT/agent_strict_rewrite.json" "$OUT/agent_lenient_rewrite.json")
+fi
 
 echo
 echo "=== 比較 ==="
-python -m silo_rag.eval --compare "$OUT/baseline.json" "$OUT/agent_strict.json" "$OUT/agent_lenient.json"
+python -m silo_rag.eval --compare "${RESULTS[@]}"

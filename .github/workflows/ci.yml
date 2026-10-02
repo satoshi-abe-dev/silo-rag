@@ -17,8 +17,9 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        # agent extra (LangGraph) is needed to import src/silo_rag/agent.py in tests and mypy.
-        run: pip install -e ".[dev,agent]"
+        # agent (LangGraph) and langchain extras are needed to import src/silo_rag/agent.py and
+        # langchain_adapter.py in tests and mypy.
+        run: pip install -e ".[dev,agent,langchain]"
 
       - name: Lint (ruff)
         run: ruff check .

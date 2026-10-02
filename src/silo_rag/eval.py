@@ -9,7 +9,10 @@ retrieval→generationのRAGパイプライン全体を実行し、検索精度�
 を、この内訳で確認できるようにするため。
 
 `--pipeline agent` を指定すると、retrieval→generationを直接呼ぶ代わりにLangGraphエージェント
-（agent.py、DAGノードG）で回答し、同じ指標で比較できる。精度に加えて、1問あたりの時間・
+（agent.py、DAGノードG）で回答し、同じ指標で比較できる。`--pipeline langchain` は、LangChain既製の
+`create_agent`（LLMのツール呼び出しで検索する。langchain_adapter.py、ノードH）で回答する比較対象
+（検索系の指標は、ツールが返した全チャンクで計算するため、検索回数が多いほど有利になる。
+回答の引用率・judgeは公平に比べられる）。精度に加えて、1問あたりの時間・
 LLM呼び出し回数・検索回数も記録する（エージェントはその分のコストを払うため）。
 `--compare` で、複数の結果ファイルを1つの比較表（Markdown）にまとめて表示できる。
 """
@@ -82,6 +85,9 @@ _JUDGE_SYSTEM = (
 )
 
 
+PIPELINES = ("baseline", "agent", "langchain")
+
+
 class _CountingClient:
     """LLMClientを包み、chatの呼び出し回数を数える（それ以外の属性は本物にそのまま任せる）。"""
 
@@ -144,18 +150,23 @@ def run_eval(
     *,
     pipeline: str = "baseline",
     grade_mode: str | None = None,
+    first_query: str | None = None,
     judge_model: str | None = None,
 ) -> list[QAResult]:
-    """pipeline: "baseline"（search→answer_questionを直接呼ぶ）か "agent"（agent.run_agent）。
+    """pipeline: "baseline"（search→answer_questionを直接呼ぶ）、"agent"（agent.run_agent）、
+        "langchain"（langchain_adapter.run_langchain_agent。LLMのツール呼び出しで検索する既製エージェント）。
     grade_mode: agentの判定の厳しさ。Noneならconfig.agent.grade_mode。
+    first_query: agentの1回目の検索クエリ（"raw"／"rewrite"）。Noneならconfig.agent.first_query。
     judge_model: LLM-as-judgeの採点に使うモデル。Noneならconfig.ai.llm_model（回答と同じモデル）。
         回答モデルを変えて比較するときは、採点モデルを固定しないとjudgeスコアが比べられない。
     """
-    if pipeline not in ("baseline", "agent"):
-        raise ValueError(f"pipelineは'baseline'か'agent'を指定してください: {pipeline!r}")
+    if pipeline not in PIPELINES:
+        raise ValueError(f"pipelineは{PIPELINES}のいずれかを指定してください: {pipeline!r}")
+    # langgraph・langchainは任意依存（.[agent]・.[langchain]）。baselineだけ使う環境ではimportしない。
     if pipeline == "agent":
-        # langgraphは任意依存（.[agent]）。baselineだけ使う環境ではimportしない。
         from .agent import run_agent
+    elif pipeline == "langchain":
+        from .langchain_adapter import run_langchain_agent
 
     results: list[QAResult] = []
     for qa in qa_pairs:
@@ -164,9 +175,21 @@ def run_eval(
         gold_evidence = [r["evidence"] for r in gold_refs]
 
         counting = _CountingClient(client)
+        extra_llm_calls = 0  # countingを通らないLLM呼び出し（langchainエージェント自身の判断）
         started = time.perf_counter()
-        if pipeline == "agent":
-            agent_result = run_agent(counting, qa["question"], top_k=top_k, grade_mode=grade_mode)  # type: ignore[arg-type]
+        if pipeline == "langchain":
+            lc_result = run_langchain_agent(counting, qa["question"], top_k=top_k)
+            scored, answer, attempts = lc_result.scored_chunks, lc_result.answer, lc_result.searches
+            extra_llm_calls = lc_result.llm_calls
+        elif pipeline == "agent":
+            # _CountingClientはLLMClientの代わりに渡せる（chat以外は本物に任せる）が、型は別。
+            agent_result = run_agent(
+                counting,  # type: ignore[arg-type]
+                qa["question"],
+                top_k=top_k,
+                grade_mode=grade_mode,
+                first_query=first_query,
+            )
             scored, answer, attempts = agent_result.scored_chunks, agent_result.answer, agent_result.attempts
         else:
             scored, answer, attempts = _answer_baseline(counting, qa["question"], top_k)
@@ -197,13 +220,13 @@ def run_eval(
             cited_gold=cited_gold,
             judge_score=judge_score,
             attempts=attempts,
-            llm_calls=counting.chat_calls,
+            llm_calls=counting.chat_calls + extra_llm_calls,
             elapsed_sec=elapsed,
         )
         results.append(result)
         print(
             f"{qa['qa_id']}: hit={hit} rr={rr:.2f} cited_gold={cited_gold} judge={judge_score} "
-            f"attempts={attempts} llm_calls={counting.chat_calls} {elapsed:.1f}s"
+            f"attempts={attempts} llm_calls={counting.chat_calls + extra_llm_calls} {elapsed:.1f}s"
         )
     return results
 
@@ -271,7 +294,11 @@ def _run_label(payload: dict, fallback: str) -> str:
         return fallback  # runメタデータが無い（この機能より前の）結果ファイル
     label = run["pipeline"]
     if run.get("grade_mode"):
-        label += f"({run['grade_mode']})"
+        # 1回目に質問そのまま（raw）で検索するのが既定。クエリを作る方（rewrite）のときだけ印を付ける。
+        detail = [run["grade_mode"], *(["rewrite-first"] if run.get("first_query") == "rewrite" else [])]
+        if run.get("max_attempts") == 1:
+            detail.append("1-search")  # 再検索しない（クエリ作成だけの効果を見るための切り分け）
+        label += f"({','.join(detail)})"
     return f"{label} / {run['llm_model']}"
 
 
@@ -299,12 +326,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="RAGパイプラインの評価（検索精度・回答品質）")
     parser.add_argument("--qa-file", type=Path, default=EVAL_DIR / "qa_pairs.json")
     parser.add_argument("--top-k", type=int, default=None, help="Noneならconfig.retrieval.top_k_finalを使う")
-    parser.add_argument("--pipeline", choices=["baseline", "agent"], default="baseline")
+    parser.add_argument("--pipeline", choices=list(PIPELINES), default="baseline")
     parser.add_argument(
         "--grade-mode",
         choices=["strict", "lenient"],
         default=None,
         help="agentの判定の厳しさ。Noneならconfig.agent.grade_mode",
+    )
+    parser.add_argument(
+        "--first-query",
+        choices=["raw", "rewrite"],
+        default=None,
+        help="agentの1回目の検索クエリ（質問そのまま／質問からLLMが作る）。Noneならconfig.agent.first_query",
     )
     parser.add_argument(
         "--judge-model",
@@ -315,7 +348,8 @@ def main() -> None:
         "--out",
         type=Path,
         default=None,
-        help="既定はbaselineならeval_results.json、agentならeval_results_agent_<grade_mode>.json",
+        help="既定は eval_results.json（baseline）、eval_results_agent_<grade_mode>.json（agent）、"
+        "eval_results_langchain.json（langchain）",
     )
     parser.add_argument(
         "--compare",
@@ -333,11 +367,18 @@ def main() -> None:
 
     qa_pairs = _load_qa_pairs(args.qa_file)
     config = load_config()
-    grade_mode = (args.grade_mode or config.agent.grade_mode) if args.pipeline == "agent" else None
+    is_agent = args.pipeline == "agent"
+    grade_mode = (args.grade_mode or config.agent.grade_mode) if is_agent else None
+    first_query = (args.first_query or config.agent.first_query) if is_agent else None
     judge_model = args.judge_model or config.ai.llm_model
     out = args.out
     if out is None:
-        name = "eval_results.json" if args.pipeline == "baseline" else f"eval_results_agent_{grade_mode}.json"
+        names = {
+            "baseline": "eval_results.json",
+            "agent": f"eval_results_agent_{grade_mode}{'_rewrite' if first_query == 'rewrite' else ''}.json",
+            "langchain": "eval_results_langchain.json",
+        }
+        name = names[args.pipeline]
         out = EVAL_DIR / name
 
     with LLMClient(config.ai) as client:
@@ -351,6 +392,7 @@ def main() -> None:
             top_k=args.top_k,
             pipeline=args.pipeline,
             grade_mode=grade_mode,
+            first_query=first_query,
             judge_model=judge_model,
         )
 
@@ -364,7 +406,8 @@ def main() -> None:
         "llm_model": config.ai.llm_model,
         "judge_model": judge_model,
         "grade_mode": grade_mode,
-        "max_attempts": config.agent.max_attempts if args.pipeline == "agent" else None,
+        "first_query": first_query,
+        "max_attempts": config.agent.max_attempts if args.pipeline in ("agent", "langchain") else None,
         "top_k": args.top_k if args.top_k is not None else config.retrieval.top_k_final,
     }
     payload = {"run": run, "summary": summary, "results": [asdict(r) for r in results]}
