@@ -203,9 +203,11 @@ C (retrieval) combines two searches of different kinds.
   is not in the index at all scores zero and changes nothing).
 - **Vector search (semantic search)**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
   measures whether the **meaning is close**. It handles paraphrases well.
-- **Combining the scores**: each score is **normalized** to 0–1 (the best score becomes 1, the worst 0, and the ones in
-  between are rescaled proportionally; if all scores are equal, all become 1, and if every keyword-search score is 0, all become 0), then the two are added using `vector_weight` (0.5 by default). An LLM then reranks the
-  top candidates. A calculation example is in the [worked example](docs/worked_example_en.md).
+- **Combining the scores**: each score is **normalized** to 0–1, then the two are added using `vector_weight` (0.5 by default).
+  Normalizing makes the best score 1 and the worst 0 and rescales the ones in between proportionally (exceptions: if the highest
+  and lowest scores are almost equal, all become 1; for keyword search, if the highest score is 0 or below, all become 0, and
+  that check comes first). An LLM then reranks the top candidates. A calculation example is in the
+  [worked example](docs/worked_example_en.md).
 - **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing is deliberately simple (no
   morphological analyzer). Japanese text is cut into overlapping **two-character pieces** (for example "予算策定" → "予算",
   "算策", "策定"), while ASCII words and IDs (such as `RPT-014`) are **kept whole and lowercased** (`rpt-014`). It uses
