@@ -4,7 +4,7 @@
 retrieval.search() と generation.answer_question() をこの層で初めて組み合わせる
 （両モジュールはDAG上お互いに依存しないよう独立実装されているため）。
 サイドバーで「エージェント」を選ぶと、代わりに agent.run_agent()（LangGraph、DAGノードG）で回答し、
-エージェントが何をしたか（検索・判定・書き直しの記録）を回答の下に表示する。
+エージェントが何をしたか（クエリ作成・検索・判定・書き直しの記録）を回答の下に表示する。
 
 起動方法: streamlit run src/silo_rag/app.py
 （`streamlit run` はファイルを直接実行するため、他モジュールのような相対import
@@ -48,7 +48,7 @@ def _filter_widgets() -> dict[str, str]:
 
 
 _MODE_BASELINE = "通常（1回検索）"
-_MODE_AGENT = "エージェント（LangGraph・必要なら再検索）"
+_MODE_AGENT = "エージェント（LangGraph・検索クエリを作ってから検索）"
 
 
 def _mode_widget() -> str:

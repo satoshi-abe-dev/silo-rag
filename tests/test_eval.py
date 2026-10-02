@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 
 import silo_rag.eval as eval_module
 from silo_rag.eval import (
     QAResult,
     _dedup_report_ids,
+    _default_result_name,
+    _positive_int,
     _reciprocal_rank,
+    _resolve_max_attempts,
     _summarize_subset,
     format_comparison,
     run_eval,
@@ -150,7 +155,7 @@ def test_run_eval_agent_uses_agent_result(monkeypatch):
 
     captured = {}
 
-    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None):
+    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None, max_attempts=None):
         captured["grade_mode"] = grade_mode
         captured["first_query"] = first_query
         for _ in range(5):
@@ -234,7 +239,7 @@ def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
     import silo_rag.langchain_adapter as adapter
     from silo_rag.langchain_adapter import LangChainAgentResult
 
-    def fake_run(client, question, *, top_k=None):
+    def fake_run(client, question, *, top_k=None, max_searches=None):
         client.chat("rerank", "x")  # 検索内のリランキング（LLMClient経由。countingに数えられる）
         return LangChainAgentResult(
             answer=Answer(text="RPT-001を参考に", citations=[]),
@@ -273,4 +278,92 @@ def test_format_comparison_marks_single_search_runs():
 
     lines = format_comparison([("a", payload)]).splitlines()
 
-    assert lines[2].startswith("| agent(lenient,rewrite-first,1-search) / qwen-7b |")
+    assert lines[2].startswith("| agent(lenient,rewrite-first,max=1) / qwen-7b |")
+
+
+def test_run_eval_passes_max_attempts_to_agent_and_langchain(monkeypatch):
+    import silo_rag.agent as agent_module
+    import silo_rag.langchain_adapter as adapter
+    from silo_rag.agent import AgentResult
+    from silo_rag.langchain_adapter import LangChainAgentResult
+
+    seen = {}
+
+    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None, max_attempts=None):
+        seen["agent"] = max_attempts
+        return AgentResult(
+            answer=Answer(text="RPT-001", citations=[]),
+            scored_chunks=[_scored("RPT-001")],
+            tried_queries=["q"],
+            attempts=1,
+            trace=[],
+        )
+
+    def fake_run_langchain(client, question, *, top_k=None, max_searches=None):
+        seen["langchain"] = max_searches
+        return LangChainAgentResult(
+            answer=Answer(text="RPT-001", citations=[]),
+            scored_chunks=[_scored("RPT-001")],
+            searches=1,
+            requested_searches=1,
+            llm_calls=2,
+        )
+
+    monkeypatch.setattr(agent_module, "run_agent", fake_run_agent)
+    monkeypatch.setattr(adapter, "run_langchain_agent", fake_run_langchain)
+
+    run_eval(_JudgeClient(), _QA, pipeline="agent", max_attempts=1)
+    run_eval(_JudgeClient(), _QA, pipeline="langchain", max_attempts=2)
+
+    assert seen == {"agent": 1, "langchain": 2}
+
+
+@pytest.mark.parametrize("text", ["0", "-1", "abc", "1.5", ""])
+def test_positive_int_rejects_zero_negative_and_non_integers(text):
+    with pytest.raises(argparse.ArgumentTypeError):
+        _positive_int(text)
+
+
+def test_positive_int_accepts_one_and_up():
+    assert _positive_int("1") == 1
+    assert _positive_int("7") == 7
+
+
+def test_resolve_max_attempts_uses_the_request_even_when_it_differs_from_config():
+    # 指定した値は、設定の値に関係なく、そのまま使う（`requested or configured`だと、偽の値が設定に化ける）。
+    assert _resolve_max_attempts("agent", 2, configured=1) == 2
+    assert _resolve_max_attempts("langchain", 2, configured=1) == 2
+
+
+def test_resolve_max_attempts_falls_back_only_when_not_requested():
+    assert _resolve_max_attempts("agent", None, configured=1) == 1
+    assert _resolve_max_attempts("agent", None, configured=3) == 3
+    # LangChain既製エージェントは、Gの設定ではなく、自分の既定（3回）を使う。
+    assert _resolve_max_attempts("langchain", None, configured=1) == 3
+    assert _resolve_max_attempts("baseline", None, configured=1) is None
+    assert _resolve_max_attempts("baseline", 5, configured=1) is None
+
+
+def test_default_result_names_differ_by_every_setting():
+    names = {
+        _default_result_name("baseline", None, None, None),
+        _default_result_name("agent", "lenient", "rewrite", 1),
+        _default_result_name("agent", "lenient", "rewrite", 3),
+        _default_result_name("agent", "lenient", "raw", 3),
+        _default_result_name("agent", "strict", "raw", 3),
+        _default_result_name("langchain", None, None, 2),
+        _default_result_name("langchain", None, None, 3),
+    }
+    assert len(names) == 7  # どれも違う名前（上限だけが違う実行も、上書きし合わない）
+
+
+def test_format_comparison_distinguishes_runs_that_differ_only_in_the_cap():
+    two = _payload("langchain", None, "qwen-7b", "qwen-7b", 0.9)
+    two["run"]["max_attempts"] = 2
+    three = _payload("langchain", None, "qwen-7b", "qwen-7b", 0.9)
+    three["run"]["max_attempts"] = 3
+
+    lines = format_comparison([("a", two), ("b", three)]).splitlines()
+
+    assert lines[2].startswith("| langchain(max=2) / qwen-7b |")
+    assert lines[3].startswith("| langchain(max=3) / qwen-7b |")

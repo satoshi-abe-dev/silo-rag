@@ -126,9 +126,10 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 - **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (search, grade, rewrite) appears under each answer.
 - **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`), and
   `--pipeline langchain` for the stock LangChain agent. To compare plain mode and the agents in one go,
-  `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` runs 3–5 variants and prints a comparison table.
-- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The recommendation for a small model (7B) is
-  `first_query = "rewrite"` and `max_attempts = 1` (see the evaluation under node G).
+  `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]` runs 3 variants (6 with `--rewrite-first`) and prints a comparison table.
+- **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The defaults are `first_query = "rewrite"` and
+  `max_attempts = 1` (write the search query, search once) — the combination that measured best on a small model (7B), and
+  one that shows no difference from plain mode on 32B (see the evaluation under node G).
 
 ### Launching the UI
 
@@ -251,8 +252,8 @@ graph TD
 ```
 
 The LLM decides "is the evidence sufficient?" and "what query to try next"; the code decides "how many times at most" via
-`[agent] max_attempts` in `config.toml` (3 by default). The first search query is chosen by `[agent] first_query`
-(`raw` = the question as is, `rewrite` = a search query the LLM writes from the question; `raw` by default).
+`[agent] max_attempts` in `config.toml` (1 by default, i.e. no re-search). The first search query is chosen by `[agent] first_query`
+(`raw` = the question as is, `rewrite` = a search query the LLM writes from the question; `rewrite` by default).
 
 ### Design decisions
 
@@ -299,7 +300,7 @@ I didn't measure the 32B model with the stock LangChain agent (LM Studio's model
 - **What helped was not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. The self-introduction and request phrasing in the question had been scattering BM25. Cross-department questions also rose from 0.40 to 0.80 (query writing + 1 search).
 - **This breakdown was prompted by losing to the stock LangChain agent.** It reached 0.93 without searching more. Looking into it, the LLM rewrote the question into a keyword-style query before every search, while my G used the question as is on the first search. My original hypothesis ("re-search makes up for it") was only half right.
 - **With 32B, none of the tweaks shows a clear effect.** Plain mode was already at 0.87; query writing + 1 search got 0.93 (one question). Cross-department dropped from 1.00 to 0.80 (one question), and to 0.60 once re-search was added.
-- **Conclusion: plain mode (`first_query = "raw"`) stays the default; the agent is an option for when you have to use a small model.** The recommendation then is `first_query = "rewrite"` with `max_attempts = 1` (write the query, search once). The re-search loop showed no benefit on top of query writing with either model.
+- **Conclusion: plain mode stays the default answer mode; the agent is an option for when you have to use a small model.** The agent's default settings are the best-measured `first_query = "rewrite"` with `max_attempts = 1` (write the query, search once). The re-search loop is still available by raising `max_attempts`, but it showed no benefit on top of query writing with either model. On 32B there was no difference from plain mode and cross-department questions tended to drop, so use plain mode with larger models. (The "G ... + query writing + 1 search" rows in the tables are these defaults, measured before they were made the defaults.)
 
 > ⚠️ **This is 15 questions, one run per variant; a one-question difference (0.07) can't be called a real difference,** and LLM output varies between runs (the same question sometimes found the gold report and sometimes didn't). Read it as a trend. I also tried Gemma 4 26B (MoE, a thinking model), but thinking inflated the output tokens to about 174 s per question, so I cut it off midway and left it out of the comparison.
 
@@ -314,7 +315,7 @@ I didn't measure the 32B model with the stock LangChain agent (LM Studio's model
 `src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). Like node G, it only calls the public functions of C and D and doesn't touch their insides.
 
 1. **`SiloRetriever`**: exposes the existing hybrid search (`search()`) as a LangChain Retriever (`BaseRetriever` from `langchain_core`). The search internals (BM25 + vectors + LLM reranking) are unchanged, and it can be used as a component from LangChain chains and agents.
-2. **`run_langchain_agent`**: uses that Retriever as a search tool for LangChain's stock `create_agent` (the LLM searches through tool calling) and answers with it. It is the comparison target for the hand-built node G, with the same answer policy and the same search cap.
+2. **`run_langchain_agent`**: uses that Retriever as a search tool for LangChain's stock `create_agent` (the LLM searches through tool calling) and answers with it. It is the comparison target for the hand-built node G, with the same answer policy and a search cap of 3 (a constant, independent of G's `max_attempts` default — making G's default 1 doesn't restrict the stock agent to one search).
 
 LLM calls go through the existing `LLMClient` for things like in-search reranking and through `ChatOpenAI` for the agent's own decisions — both pointed at the local LM Studio (`config.ai.base_url`) — so the zero-external-transmission policy is unchanged. Evaluate it with `python -m silo_rag.eval --pipeline langchain`.
 The result is the 7B table above (hit_rate 0.93, citation rate 0.87). Its retrieval metrics are computed over every chunk the tool returned, so more searches favor it (it surfaced 4.5 reports on average versus 4.0 for plain mode — a small gap); citation rate and judge compare fairly.

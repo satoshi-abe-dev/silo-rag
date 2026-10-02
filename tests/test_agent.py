@@ -70,6 +70,16 @@ class _ScriptedAgentClient:
         return str(item)
 
 
+@pytest.fixture(autouse=True)
+def _first_query_raw_by_default(monkeypatch):
+    """このファイルの多くのテストは「質問そのままで検索する」動きを前提に書かれている。
+
+    設定の既定値（first_query）は"rewrite"なので、環境変数で"raw"に固定する。クエリを作る動きの
+    テストは、first_query="rewrite"を引数で明示している。既定値そのもののテストはtest_config.py。
+    """
+    monkeypatch.setenv("SILORAG_AGENT_FIRST_QUERY", "raw")
+
+
 @pytest.fixture
 def fake_pipeline(monkeypatch):
     """search()・answer_question()を差し替え、呼び出し内容を記録する。

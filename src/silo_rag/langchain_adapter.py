@@ -40,6 +40,10 @@ from .generation import Answer, _build_citations
 from .retrieval import ScoredChunk, search
 
 TOOL_NAME = "search_reports"
+# 既製エージェントの検索の上限回数（既定）。自作エージェントの既定（config.agent.max_attempts）とは独立にして
+# いる。自作側の既定を1（再検索しない）にしても、既製エージェントには複数回の検索を許す
+# （測定した条件と、LLMが自分で検索回数を決めるという既製エージェントの前提を保つため）。
+DEFAULT_MAX_SEARCHES = 3
 _MAX_HISTORY_TURNS = 3
 
 _NO_ANSWER = "検索の上限回数内に回答に至りませんでした。"
@@ -209,11 +213,11 @@ def run_langchain_agent(
 
     client: 検索内のLLM処理（リランキング・埋め込み）に使うLLMClient。
     top_k: 1回の検索で返すチャンク数。Noneならconfig.retrieval.top_k_final。
-    max_searches: 検索の上限回数。Noneならconfig.agent.max_attempts（自作エージェントと同じ上限）。
+    max_searches: 検索の上限回数。NoneならDEFAULT_MAX_SEARCHES（3回）。
     model: エージェントのLLM。Noneならconfig.aiのローカルサーバーに向けたChatOpenAIを作る
         （テストでフェイクを差し込むための引数）。
     """
-    resolved_max = max(1, max_searches if max_searches is not None else load_config().agent.max_attempts)
+    resolved_max = max(1, max_searches if max_searches is not None else DEFAULT_MAX_SEARCHES)
     retriever = SiloRetriever(client=client, filters=filters, top_k=top_k, max_calls=resolved_max)
     agent = create_agent(
         model or _build_chat_model(),

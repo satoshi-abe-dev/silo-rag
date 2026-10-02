@@ -126,9 +126,10 @@ pip install -e ".[langchain]"    # LangChain連携（ノードH）。langgraph�
 - **UI**: サイドバーの「回答方式」で「エージェント」を選ぶ。回答の下に、エージェントが何をしたか（検索・判定・書き直し）の記録が出る。
 - **評価**: `python -m silo_rag.eval --pipeline agent`（`--grade-mode strict|lenient`、`--first-query raw|rewrite`）。
   LangChain既製エージェントとの比較は`--pipeline langchain`。通常方式・エージェントをまとめて比べるには
-  `bash scripts/compare_pipelines.sh <モデル名> [--rewrite-first]`（3〜5方式を続けて評価して比較表を出す）。
-- **設定**: `config.toml`の`[agent]`（`max_attempts`、`grade_mode`、`first_query`）。小さいモデル（7B）で使うときの推奨は
-  `first_query = "rewrite"`と`max_attempts = 1`（ノードGの評価を参照）。
+  `bash scripts/compare_pipelines.sh <モデル名> [--rewrite-first]`（3方式を続けて評価して比較表を出す。`--rewrite-first`を付けると6方式）。
+- **設定**: `config.toml`の`[agent]`（`max_attempts`、`grade_mode`、`first_query`）。既定は`first_query = "rewrite"`と
+  `max_attempts = 1`（検索クエリを作って1回検索する）。小さいモデル（7B）での測定で最も良かった組み合わせで、
+  32Bでは通常方式との差が見えない（ノードGの評価を参照）。
 
 ### UIを起動する
 
@@ -252,8 +253,8 @@ graph TD
 ```
 
 「根拠が十分か」「次にどんなクエリで探すか」はLLMが判断し、「何回まで繰り返すか」は`config.toml`の
-`[agent] max_attempts`（既定3回）でコードが決める。1回目の検索クエリは`[agent] first_query`で選ぶ
-（`raw`＝質問そのまま、`rewrite`＝質問からLLMが検索クエリを作る。既定は`raw`）。
+`[agent] max_attempts`（既定1回＝再検索しない）でコードが決める。1回目の検索クエリは`[agent] first_query`で選ぶ
+（`raw`＝質問そのまま、`rewrite`＝質問からLLMが検索クエリを作る。既定は`rewrite`）。
 
 ### 設計判断
 
@@ -317,9 +318,11 @@ graph TD
   使っていた。最初の仮説（「再検索で補える」）は、半分しか合っていなかった。
 - **32Bでは、どの工夫も、はっきりした効果が見えない。** 通常方式がすでに0.87で、クエリ作成＋1検索が0.93（1問差）。
   部署横断は1.00→0.80（1問差）に下がり、再検索まで付けると0.60に下がった。
-- **結論：既定は通常方式（`first_query = "raw"`）のまま。エージェントは、小さいモデルを使わざるを得ないときのオプション。**
-  その場合の推奨は`first_query = "rewrite"`＋`max_attempts = 1`（クエリを作って1回検索する）。再検索のループは、
-  クエリ作成に上乗せする効果を、どちらのモデルでも確認できなかった。
+- **結論：回答方式の既定は通常方式のまま。エージェントは、小さいモデルを使わざるを得ないときのオプション。**
+  エージェントの既定設定は、測定で最も良かった`first_query = "rewrite"`＋`max_attempts = 1`（クエリを作って1回検索する）
+  にした。再検索のループは、設定（`max_attempts`を増やす）で使えるが、クエリ作成に上乗せする効果を、どちらのモデルでも
+  確認できなかった。32Bでは、通常方式との差が見えず、部署横断が下がる傾向もあるので、大きいモデルでは通常方式を使う。
+  なお、表の「G ... ＋クエリ作成 ＋ 1検索」の行が、この既定設定にあたる（既定を切り替える前の測定）。
 
 > ⚠️ **15問・各方式1回ずつの結果で、差が1問分（0.07）の比較は断定できない。** LLMの出力にもばらつきがある
 > （同じ質問でも、実行のたびに正解を拾えたり拾えなかったりした）。「傾向」として読んでほしい。
@@ -346,7 +349,8 @@ graph TD
    規格に合わせて公開する。検索の中身（BM25＋ベクトル＋LLMリランキング）はそのままで、LangChainのチェーンやエージェントから
    部品として使える。
 2. **`run_langchain_agent`**: 上のRetrieverを検索ツールにして、LangChain既製の`create_agent`（LLMがツール呼び出しで検索する）で
-   回答する。自作のノードGとの比較対象。回答の方針と検索の上限回数は、Gと同じにしてある。
+   回答する。自作のノードGとの比較対象。回答の方針はGと同じで、検索の上限回数は3回（Gの`max_attempts`の既定とは
+   独立した定数。Gの既定を1にしても、既製エージェントには複数回の検索を許す）。
 
 LLM呼び出しは、検索内のリランキング等は既存の`LLMClient`、エージェント自身の判断は`ChatOpenAI`経由で、どちらもローカルの
 LM Studio（`config.ai.base_url`）に向かう。外部送信ゼロの方針は変わらない。評価は`python -m silo_rag.eval --pipeline langchain`。
