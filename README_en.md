@@ -214,8 +214,10 @@ C combines two searches of different kinds.
 - "Acyclic" only guarantees a valid build order exists; it's separate from independence. A single straight chain (A→B→C→D→E→F) is acyclic yet offers zero parallelism. The payoff here came from the graph's shape: no arrow happens to connect C and D
 
 > ⚠️ **"Parallel" here means parallel development (writing the code), not parallel execution at runtime.**
-> The DAG's arrows show which module depends on which; they are not the runtime order of operations.
-> At runtime, each question runs C (retrieval) then D (generation) sequentially — D takes the chunks C returned as its input, handed over by E/F. Because C and D don't depend on each other, two Agents **could write them at the same time**; that is all the claim means.
+>
+> - The DAG's arrows show which module depends on which; they are not the runtime order of operations
+> - At runtime, each question runs C (retrieval) and then D (generation), one after the other. D takes the chunks C returned as its input, handed over by E/F
+> - Because C and D don't depend on each other, two Agents **could write them at the same time**; that is all the claim means
 
 ## Development process (graph engineering + independent review)
 
