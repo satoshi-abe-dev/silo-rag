@@ -226,3 +226,26 @@ def test_format_comparison_warns_when_judge_models_differ():
         ]
     )
     assert "採点モデルが実行ごとに異なる" in table
+
+
+def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
+    import silo_rag.langchain_adapter as adapter
+    from silo_rag.langchain_adapter import LangChainAgentResult
+
+    def fake_run(client, question, *, top_k=None):
+        client.chat("rerank", "x")  # 検索内のリランキング（LLMClient経由。countingに数えられる）
+        return LangChainAgentResult(
+            answer=Answer(text="RPT-001を参考に", citations=[]),
+            scored_chunks=[_scored("RPT-009"), _scored("RPT-001")],
+            searches=2,
+            llm_calls=3,  # エージェント自身の判断。countingを通らないので、別に足される
+        )
+
+    monkeypatch.setattr(adapter, "run_langchain_agent", fake_run)
+
+    (result,) = run_eval(_JudgeClient(), _QA, pipeline="langchain")
+
+    assert result.attempts == 2
+    assert result.llm_calls == 4  # リランキング1回＋エージェント3回
+    assert result.retrieved_report_ids == ["RPT-009", "RPT-001"]
+    assert result.cited_gold
