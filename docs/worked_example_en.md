@@ -3,7 +3,8 @@
 [日本語](worked_example_ja.md) | English
 
 This follows a question through each processing step, using **real values**. It helps to read
-[the README's "Terms: BM25 and vector search"](../README_en.md#terms-bm25-and-vector-search) first.
+[the README's "Terms: BM25 and vector search"](../README_en.md#terms-bm25-and-vector-search) first (BM25 = keyword
+search; vector search = semantic search).
 
 ## Setup
 
@@ -21,9 +22,9 @@ This follows a question through each processing step, using **real values**. It 
 | --- | --- |
 | 0. Ingestion (once, beforehand) | report file → one chunk per heading → one vector (768 numbers) per chunk |
 | 1. Query writing (LLM) | question → search query (only the words for what you want to find) |
-| 2. BM25 | query → scores for chunks whose words match (top 20) |
-| 3. Vector search | query → scores for chunks whose meaning is close (top 20) |
-| 4. Blending | scale both scores to 0–1 and add them half and half → top 20 |
+| 2. Keyword search (BM25) | query → scores for chunks whose words match (top 20) |
+| 3. Semantic search (vector search) | query → scores for chunks whose meaning is close (top 20) |
+| 4. Combining the scores | normalize each score to 0–1, then add them half and half → top 20 |
 | 5. Reranking (LLM) | the 20 candidates → ordered by relevance to the question → top 5 |
 | 6. Answer generation (LLM) | the top 5 chunks → an answer with citations |
 
@@ -71,30 +72,55 @@ BM25, on the other hand, uses the chunk text itself (recomputed over all chunks 
 (Pieces are counted as in the search preprocessing: Japanese is cut into overlapping two-character pieces — "予算策定" →
 "予算", "算策", "策定" — and an ASCII word counts as one piece.)
 
-### 2–4. BM25, vector search, blending
+### 2–4. The searches, and combining their scores
 
-| Rank | BM25 (score) | Vector search (score = negative distance) | Blended (total = BM25 part + vector part) |
+Using the query, two searches of different kinds are run, and their scores are merged into one ranking to make the top-20
+candidates.
+
+- **Keyword search (BM25)**: scores each chunk by how much of the query's wording appears in its text.
+- **Semantic search (vector search)**: scores each chunk by how close the query is to the chunk's vector (made at ingestion).
+  The score is the negative of the distance, so closer means larger.
+- **Combining the scores**: adds the two scores into a single ranking. How is explained after the table.
+
+| Rank | Keyword search (score) | Semantic search (score) | Combined (score = 0.5 × keyword part + 0.5 × semantic part) |
 | --- | --- | --- | --- |
-| 1 | RPT-018::対象領域・テーマ (123.8) | RPT-018::プロジェクト目的 (-0.353) | RPT-018::プロジェクト目的 (0.98 = mean of 0.96 and 1.00) |
-| 2 | RPT-018::プロジェクト目的 (122.4) | RPT-018::与件 (-0.410) | RPT-018::対象領域・テーマ (0.74) |
-| 3 | RPT-016::対象領域・テーマ (105.6) | RPT-056::プロジェクト目的 (-0.410) | RPT-018::与件 (0.40) |
-| 4 | RPT-018::与件 (97.8) | RPT-035::プロジェクト目的 (-0.415) | RPT-035::プロジェクト目的 (0.36) |
-| 5 | RPT-025::プロジェクト目的 (96.8) | RPT-044::実施条件 (-0.419) | RPT-025::プロジェクト目的 (0.33) |
+| 1 | RPT-018::対象領域・テーマ (123.8) | RPT-018::プロジェクト目的 (-0.353) | RPT-018::プロジェクト目的 (0.98 ≈ 0.5×0.96 + 0.5×1.00) |
+| 2 | RPT-018::プロジェクト目的 (122.4) | RPT-018::与件 (-0.410) | RPT-018::対象領域・テーマ (0.74 ≈ 0.5×1.00 + 0.5×0.47) |
+| 3 | RPT-016::対象領域・テーマ (105.6) | RPT-056::プロジェクト目的 (-0.410) | RPT-018::与件 (0.40 ≈ 0.5×0.24 + 0.5×0.56) |
+| 4 | RPT-018::与件 (97.8) | RPT-035::プロジェクト目的 (-0.415) | RPT-035::プロジェクト目的 (0.36 ≈ 0.5×0.21 + 0.5×0.51) |
+| 5 | RPT-025::プロジェクト目的 (96.8) | RPT-044::実施条件 (-0.419) | RPT-025::プロジェクト目的 (0.33 ≈ 0.5×0.21 + 0.5×0.45) |
 
-- A BM25 score is an absolute value set by word matches, so it cannot simply be added to a vector score. Vector scores
-  are larger when the distance is smaller. So each is **scaled so that the minimum and maximum among its top 20 become 0
-  and 1**, then the two are added half and half.
-- The blended first place is a chunk that was second in BM25 and first in vector search. Chunks that score high on both rise.
+**How the scores are combined**
+
+1. **They can't be added as they are.** Keyword-search scores are large values around 100; semantic-search scores are small
+   negative values around -0.4. Both the size and the sign differ.
+2. **Normalize each one.** For each search, within its top 20, the best score becomes 1.00 and the worst becomes 0.00, and the
+   scores in between are rescaled proportionally into the 0–1 range. The formula is
+   `(score − lowest) ÷ (highest − lowest)`. In the table, the keyword search's highest score, 123.8, becomes 1.00 and
+   122.4 becomes 0.96; the semantic search's highest, -0.353, becomes 1.00 and -0.410 becomes 0.56. There are two
+   exceptions. (a) **If the highest and lowest scores differ by almost nothing (under 1e-12)** — the scores are treated as
+   all equal — every chunk gets 1.00. (b) **If the keyword search's highest score is 0 or
+   below** (no chunk matched any word), every chunk gets 0.00. (b) is checked before (a), so when every keyword-search score
+   is 0, the chunks get 0.00, not 1.00, even though the scores are all equal.
+3. **Add the normalized scores, half and half.** The combined score is
+   `0.5 × keyword part + 0.5 × semantic part`. The 0.5 is the `vector_weight` setting; raise it to favor semantic search. For
+   the first row, the keyword part is 0.96 and the semantic part is 1.00, so 0.5×0.96 + 0.5×1.00 = 0.98. A chunk that is not in
+   one search's top 20 counts as 0.00 on that side. Also, the formulas in the tables (≈) use values rounded to two decimals, so
+   the last digit may not match; the real calculation uses the unrounded values (for example, 0.5×0.01 + 0.5×1.00 = 0.505, but
+   the table shows 0.50).
+
+The combined first place is a chunk that was second in keyword search and first in semantic search. Chunks that score high on
+both rise.
 
 ### 5. Reranking (LLM)
 
-The LLM reorders the blended top 20 by relevance to the question and picks the top 5. (The reranking LLM receives the
+The LLM reorders the combined top 20 by relevance to the question and picks the top 5. (The reranking LLM receives the
 **rewritten query**; the answer-generating LLM receives the original question.)
 
 1. RPT-018::プロジェクト目的 2. RPT-018::与件 3. RPT-015::対象領域・テーマ 4. RPT-035::プロジェクト目的
 5. RPT-016::対象領域・テーマ
 
-`RPT-015`, which was not in the blended top 5, entered at third place (the LLM picked it from the 20 candidates).
+`RPT-015`, which was not in the combined top 5, entered at third place (the LLM picked it from the 20 candidates).
 
 ### 6. Answer generation (LLM)
 
@@ -129,21 +155,22 @@ The 32B model did not. In another run of the same 7B model on the same question,
 "経営企画部 商品リニューアル マーケティング施策 落とし穴", with spaces and without "既存" (existing) — "経営企画部"
 was kept both times.
 
-### 2–4. BM25, vector search, blending
+### 2–4. The searches, and combining their scores
 
-In BM25, **the gold report RPT-041 moved from third place to first once the question was rewritten** (question as is:
+In keyword search (BM25), **the gold report RPT-041 moved from third place to first once the question was rewritten** (question as is:
 3rd; 7B query: 1st; 32B query: 1st).
 
-| Rank | BM25 (score) | Vector search (score) | Blended (total = BM25 part + vector part) |
+| Rank | Keyword search (score) | Semantic search (score) | Combined (score = 0.5 × keyword part + 0.5 × semantic part) |
 | --- | --- | --- | --- |
-| 1 | **RPT-041::成果サマリー** (117.8) | RPT-017::推進体制 (-0.299) | RPT-017::推進体制 (0.50 = mean of 0.01 and 1.00) |
-| 2 | RPT-018::対象領域・テーマ (112.7) | RPT-042::推進体制 (-0.309) | **RPT-041::成果サマリー** (0.50 = mean of 1.00 and 0.00) |
-| 3 | RPT-016::対象領域・テーマ (111.9) | RPT-005::主要リソース (-0.342) | RPT-042::推進体制 (0.48) |
-| 4 | RPT-027::成果サマリー (109.9) | RPT-048::推進体制 (-0.345) | RPT-005::主要リソース (0.41) |
-| 5 | RPT-025::主要リソース (108.8) | RPT-019::推進体制 (-0.358) | RPT-048::推進体制 (0.37) |
+| 1 | **RPT-041::成果サマリー** (117.8) | RPT-017::推進体制 (-0.299) | RPT-017::推進体制 (0.50 ≈ 0.5×0.01 + 0.5×1.00) |
+| 2 | RPT-018::対象領域・テーマ (112.7) | RPT-042::推進体制 (-0.309) | **RPT-041::成果サマリー** (0.50 ≈ 0.5×1.00 + 0.5×0.00) |
+| 3 | RPT-016::対象領域・テーマ (111.9) | RPT-005::主要リソース (-0.342) | RPT-042::推進体制 (0.48 ≈ 0.5×0.02 + 0.5×0.94) |
+| 4 | RPT-027::成果サマリー (109.9) | RPT-048::推進体制 (-0.345) | RPT-005::主要リソース (0.41 ≈ 0.5×0.07 + 0.5×0.76) |
+| 5 | RPT-025::主要リソース (108.8) | RPT-019::推進体制 (-0.358) | RPT-048::推進体制 (0.37 ≈ 0.5×0.00 + 0.5×0.74) |
 
-The vector-search top is filled with "推進体制" (project structure) chunks that have little to do with the question, and
-**RPT-041 is not among them**. In the blended list, RPT-041 stays in second place.
+The semantic-search top is filled with "推進体制" (project structure) chunks that have little to do with the question, and
+**RPT-041 is not among them** (which is why RPT-041's semantic part is 0.00 in the combined column). Even so, RPT-041 stays in
+second place after combining.
 
 ### 5. Reranking (LLM)
 
@@ -171,17 +198,17 @@ comes from, I counted per step over all 15 questions. Numbers are "questions (of
 
 | Step | Question as is | 7B query | 32B query |
 | --- | --- | --- | --- |
-| BM25 alone, top 5 | 11 | **15** | **15** |
-| Vector search alone, top 5 | 5 | 5 | 7 |
-| Right after blending, top 5 | 10 | 12 | 11 |
-| Blended top 20 (the reranking candidates) | 15 | 15 | 15 |
+| Keyword search (BM25) alone, top 5 | 11 | **15** | **15** |
+| Semantic search (vector search) alone, top 5 | 5 | 5 | 7 |
+| Right after combining the scores, top 5 | 10 | 12 | 11 |
+| Combined top 20 (the reranking candidates) | 15 | 15 | 15 |
 
-- **BM25 improved a lot with the rewrite** (11 → 15). But a rewrite does more than drop extra words: it also changes the
+- **Keyword search (BM25) improved a lot with the rewrite** (11 → 15). But a rewrite does more than drop extra words: it also changes the
   choice of words and the spacing (the 7B query for QA-001, for instance, drops "既存"). Whether "removing the extra
   words" is the reason is unconfirmed — I did not run an experiment that isolates it.
-- **Vector search was unchanged in total** (5 → 5) and is weak to begin with (5–7 questions). Per question, though, two
-  questions gained a hit and two lost one, so they merely swapped places. Vector rankings and scores are also used in the
-  blending, so they can affect the blended result even when the top-5 hit count does not change.
+- **Semantic search (vector search) was unchanged in total** (5 → 5) and is weak to begin with (5–7 questions). Per question, though, two
+  questions gained a hit and two lost one, so they merely swapped places. Vector rankings and scores are also used in
+  combining the scores, so they can affect the combined result even when the top-5 hit count does not change.
 - **The 20 reranking candidates already contained the gold report for all 15 questions, even before rewriting.** So
   misses do not happen in collecting candidates; they happen in choosing the top 5 from them.
 

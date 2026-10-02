@@ -190,7 +190,7 @@ If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is 
 
 C (retrieval) combines two searches of different kinds.
 
-- **BM25**: keyword search — a **formula** that scores each document by how often, and how distinctively, the words of the
+- **BM25 (keyword search)**: a **formula** that scores each document by how often, and how distinctively, the words of the
   question appear in it. It is not an AI model and involves no training. Three ideas set the score:
   1. The more often a question word appears in a document, the higher the score (with diminishing returns).
   2. A word that appears in almost every document (the Japanese equivalents of "is", "please") barely counts, while a
@@ -201,9 +201,13 @@ C (retrieval) combines two searches of different kinds.
   treating a paraphrase ("budget" vs. "cost estimate") as the same thing, and when the question contains words unrelated
   to the search, they raise the score of any document that happens to contain them, which can shift the ranking (a word that
   is not in the index at all scores zero and changes nothing).
-- **Vector search**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
+- **Vector search (semantic search)**: an embedding model (an AI model) turns each sentence into a list of numbers, and distance between them
   measures whether the **meaning is close**. It handles paraphrases well.
-- **Combined**: the two scores are blended with `vector_weight` (0.5 by default), and an LLM reranks the top candidates.
+- **Combining the scores**: each score is **normalized** to 0–1, then the two are added using `vector_weight` (0.5 by default).
+  Normalizing makes the best score 1 and the worst 0 and rescales the ones in between proportionally (exceptions: if the highest
+  and lowest scores are almost equal, all become 1; for keyword search, if the highest score is 0 or below, all become 0, and
+  that check comes first). An LLM then reranks the top candidates. A calculation example is in the
+  [worked example](docs/worked_example_en.md).
 - **In this project**: Japanese has no clear word boundaries, so BM25's preprocessing is deliberately simple (no
   morphological analyzer). Japanese text is cut into overlapping **two-character pieces** (for example "予算策定" → "予算",
   "算策", "策定"), while ASCII words and IDs (such as `RPT-014`) are **kept whole and lowercased** (`rpt-014`). It uses
@@ -213,8 +217,8 @@ C (retrieval) combines two searches of different kinds.
 
 ### Worked example: how one question becomes an answer
 
-[docs/worked_example_en.md](docs/worked_example_en.md) follows a question through ingestion, query writing, BM25, vector search,
-blending, reranking, and answer generation, with real values. It has two examples — one that works and one that doesn't (the gold
+[docs/worked_example_en.md](docs/worked_example_en.md) follows a question through ingestion, query writing, keyword search (BM25),
+semantic search (vector search), combining the scores, reranking, and answer generation, with real values. It has two examples — one that works and one that doesn't (the gold
 report was among the candidates but dropped in reranking) — and a step-by-step breakdown of where the query rewrite helps.
 
 ### What a "node" actually is
