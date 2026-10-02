@@ -216,6 +216,38 @@ def test_agent_caps_parallel_tool_calls_within_one_response(fake_search):
     assert result.answer.text == "回答"
 
 
+@pytest.mark.parametrize("searches", [1, 2, 3])
+def test_agent_returns_valid_answer_after_exactly_max_searches(fake_search, searches):
+    # 検索が上限ちょうどまで続いても、有効な回答を捨てないこと（codexレビューで指摘された境界。
+    # ステップ数の上限がぎりぎりだと、回答を出したあとにGraphRecursionErrorになっていた）。
+    _, results = fake_search
+    results.extend([[_sc(f"c{i}")] for i in range(searches)])
+    model = _model(*[_call_tool(f"q{i}", f"t{i}") for i in range(searches)], AIMessage(content="有効な回答"))
+
+    result = run_langchain_agent(object(), "質問", top_k=5, max_searches=searches, model=model)
+
+    assert result.answer.text == "有効な回答"
+    assert result.searches == searches
+    assert result.llm_calls == searches + 1
+
+
+def test_agent_counts_actual_model_calls_when_it_loops_on_an_unknown_tool(fake_search):
+    # 無効なツール呼び出しを繰り返すモデル。検索は0回のまま、モデルの呼び出し回数は実際の数が返ること
+    # （「検索回数＋1」の推測では、実際より少なく報告していた）。
+    wrong = (
+        AIMessage(content="", tool_calls=[{"name": "wrong_tool", "args": {"query": "q"}, "id": f"t{i}"}])
+        for i in count()
+    )
+    model = _FakeToolModel(messages=wrong, seen=[])
+
+    result = run_langchain_agent(object(), "質問", top_k=5, max_searches=3, model=model)
+
+    assert result.searches == 0
+    assert result.answer.text == _NO_ANSWER
+    assert result.llm_calls == len(model.seen)
+    assert result.llm_calls > 1
+
+
 def test_agent_dedups_chunks_across_searches(fake_search):
     _, results = fake_search
     results.extend([[_sc("c1"), _sc("c2")], [_sc("c2"), _sc("c3")]])

@@ -35,10 +35,10 @@ echo "=== 1/3: baseline ==="
 python -m silo_rag.eval --pipeline baseline --out "$OUT/baseline.json"
 
 echo "=== 2/3: agent (strict) ==="
-python -m silo_rag.eval --pipeline agent --grade-mode strict --out "$OUT/agent_strict.json"
+python -m silo_rag.eval --pipeline agent --grade-mode strict --first-query raw --out "$OUT/agent_strict.json"
 
 echo "=== 3/3: agent (lenient) ==="
-python -m silo_rag.eval --pipeline agent --grade-mode lenient --out "$OUT/agent_lenient.json"
+python -m silo_rag.eval --pipeline agent --grade-mode lenient --first-query raw --out "$OUT/agent_lenient.json"
 
 RESULTS=("$OUT/baseline.json" "$OUT/agent_strict.json" "$OUT/agent_lenient.json")
 

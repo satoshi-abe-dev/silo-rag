@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage
@@ -70,6 +71,20 @@ _TOOL_DESCRIPTION = (
 _DOCUMENT_PROMPT = PromptTemplate.from_template(
     "[出典 report_id={report_id} / 部署={dept} / セクション={section}]\n{page_content}"
 )
+
+
+class _ModelCallCounter(BaseCallbackHandler):
+    """エージェント自身のLLM（チャットモデル）の呼び出し回数を、実際に数える。
+
+    メッセージ数や検索回数からの推測だと、無効なツール呼び出しの繰り返しや、上限での打ち切りの途中で
+    実際の回数とずれる（codexレビューで指摘され、修正した）。
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+
+    def on_chat_model_start(self, serialized: Any, messages: Any, **kwargs: Any) -> None:
+        self.count += 1
 
 
 class SiloRetriever(BaseRetriever):
@@ -211,13 +226,17 @@ def run_langchain_agent(
         messages.extend([HumanMessage(q), AIMessage(a)])
     messages.append(HumanMessage(question))
 
+    counter = _ModelCallCounter()
     try:
-        # 検索1回につき「モデル→ツール」の2ステップ、最後にモデルの回答が1ステップ。
-        # 上限回数を超えて検索しようとすると、ここでGraphRecursionErrorになって止まる。
+        # 検索1回につき「モデル→ツール」の2ステップ、最後にモデルの回答が1ステップで、検索が上限ちょうどまで
+        # 続いても回答まで届くよう、ステップ数の上限には余裕を持たせる（ぎりぎりの値にすると、有効な回答が
+        # 出ているのに打ち切ってしまう）。検索の回数そのものはRetrieverの上限で止める。この上限は、
+        # 上限を超えた検索を要求し続ける（またはツール名を間違え続ける）ループを止めるための安全装置。
         # 下の型チェック警告（call-overload）は、create_agentの入力型が
         # mypyのoverload解決に通らないため抑えている。
         result = agent.invoke(  # type: ignore[call-overload]
-            {"messages": messages}, config=RunnableConfig(recursion_limit=2 * resolved_max + 1)
+            {"messages": messages},
+            config=RunnableConfig(recursion_limit=2 * resolved_max + 3, callbacks=[counter]),
         )
     except GraphRecursionError:
         chunks = _dedup_chunks(retriever.retrieved)
@@ -226,7 +245,7 @@ def run_langchain_agent(
             scored_chunks=chunks,
             searches=retriever.search_calls,
             requested_searches=retriever.search_requests,
-            llm_calls=retriever.search_calls + 1,  # 検索ごとに1回＋上限を超えようとした最後の1回
+            llm_calls=counter.count,
         )
 
     new_messages = result["messages"][len(messages) :]
@@ -240,5 +259,5 @@ def run_langchain_agent(
         scored_chunks=chunks,
         searches=retriever.search_calls,
         requested_searches=retriever.search_requests,
-        llm_calls=sum(1 for m in new_messages if isinstance(m, AIMessage)),
+        llm_calls=counter.count,
     )
