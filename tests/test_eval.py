@@ -238,6 +238,7 @@ def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
             answer=Answer(text="RPT-001を参考に", citations=[]),
             scored_chunks=[_scored("RPT-009"), _scored("RPT-001")],
             searches=2,
+            requested_searches=2,
             llm_calls=3,  # エージェント自身の判断。countingを通らないので、別に足される
         )
 

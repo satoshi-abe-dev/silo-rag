@@ -19,19 +19,20 @@ LLM呼び出しは、検索内のリランキングなどは既存のLLMClient�
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import create_retriever_tool
 from langgraph.errors import GraphRecursionError
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from .config import load_config
 from .generation import Answer, _build_citations
@@ -76,6 +77,16 @@ class SiloRetriever(BaseRetriever):
 
     `retrieved`・`search_calls`には、呼ばれた履歴を記録する（エージェントがどのチャンクを
     見たか、何回検索したかを、評価やUIで後から調べるため）。
+
+    検索は1つずつ順番に実行する。create_agentのLLMは、1回の応答で検索ツールを複数同時に呼ぶこと
+    （並列ツール呼び出し）があり、LangGraphはそれを別スレッドで同時に実行する。しかしsearch()は
+    1スレッドでの利用を前提にしていて、同時に走らせるとChromaDB（同じフォルダの同時オープン）と
+    LM Studio（埋め込みの同時リクエスト → HTTP 500）の両方で失敗する（実データのQA-005で再現）。
+
+    max_callsを指定すると、検索を実行する回数をその回数までに制限する。上限を超えた呼び出しは
+    検索せずに空の結果を返す（search_requestsには数える）。LangGraphのステップ数の上限
+    （recursion_limit）は「モデルが何回考え直すか」しか制限できず、1回の応答の中の並列ツール呼び出しには
+    効かない。実際、7Bモデルが1回の応答で検索ツールを約50回同時に呼ぼうとした（QA-005）。
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -83,13 +94,20 @@ class SiloRetriever(BaseRetriever):
     client: Any  # LLMClient（search()内のリランキング・クエリ書き換え・埋め込みに使う）
     filters: dict[str, str] | None = None
     top_k: int | None = None
+    max_calls: int | None = None
     retrieved: list[ScoredChunk] = Field(default_factory=list)
-    search_calls: int = 0
+    search_calls: int = 0  # 実際に検索した回数
+    search_requests: int = 0  # 検索を要求された回数（上限超過で実行しなかった分を含む）
+    _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     def _get_relevant_documents(self, query: str, *, run_manager: Any = None) -> list[Document]:
-        scored = search(self.client, query, top_k=self.top_k, filters=self.filters)
-        self.search_calls += 1
-        self.retrieved.extend(scored)
+        with self._lock:
+            self.search_requests += 1
+            if self.max_calls is not None and self.search_calls >= self.max_calls:
+                return []
+            scored = search(self.client, query, top_k=self.top_k, filters=self.filters)
+            self.search_calls += 1
+            self.retrieved.extend(scored)
         return [_to_document(sc) for sc in scored]
 
 
@@ -123,7 +141,8 @@ def build_retriever_tool(retriever: SiloRetriever):
 class LangChainAgentResult:
     answer: Answer
     scored_chunks: list[ScoredChunk]  # 検索ツールが返したチャンク（呼ばれた順・重複排除）
-    searches: int  # 検索ツールの呼び出し回数
+    searches: int  # 実際に検索した回数（上限max_searches以下）
+    requested_searches: int  # エージェントが検索を要求した回数（上限超過で実行しなかった分を含む）
     llm_calls: int  # エージェント自身の判断のLLM呼び出し回数（検索内のリランキング等は含まない）
 
 
@@ -180,7 +199,7 @@ def run_langchain_agent(
         （テストでフェイクを差し込むための引数）。
     """
     resolved_max = max(1, max_searches if max_searches is not None else load_config().agent.max_attempts)
-    retriever = SiloRetriever(client=client, filters=filters, top_k=top_k)
+    retriever = SiloRetriever(client=client, filters=filters, top_k=top_k, max_calls=resolved_max)
     agent = create_agent(
         model or _build_chat_model(),
         tools=[build_retriever_tool(retriever)],
@@ -206,6 +225,7 @@ def run_langchain_agent(
             answer=Answer(text=_NO_ANSWER, citations=_build_citations([sc.chunk for sc in chunks])),
             scored_chunks=chunks,
             searches=retriever.search_calls,
+            requested_searches=retriever.search_requests,
             llm_calls=retriever.search_calls + 1,  # 検索ごとに1回＋上限を超えようとした最後の1回
         )
 
@@ -218,6 +238,7 @@ def run_langchain_agent(
             citations=_build_citations([sc.chunk for sc in chunks]),
         ),
         scored_chunks=chunks,
-        searches=sum(1 for m in new_messages if isinstance(m, ToolMessage) and m.name == TOOL_NAME),
+        searches=retriever.search_calls,
+        requested_searches=retriever.search_requests,
         llm_calls=sum(1 for m in new_messages if isinstance(m, AIMessage)),
     )

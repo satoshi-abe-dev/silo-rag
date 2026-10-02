@@ -118,6 +118,54 @@ def test_tool_output_includes_citation_header(fake_search):
     assert "c1の本文" in output
 
 
+def test_retriever_runs_concurrent_searches_one_at_a_time(monkeypatch):
+    # 並列ツール呼び出しで同時に呼ばれても、search()が重ならないこと
+    # （ChromaDB・LM Studioが同時実行に耐えない）。
+    import threading
+    import time
+
+    active = 0
+    max_active = 0
+    guard = threading.Lock()
+
+    def slow_search(client, query, **kwargs):
+        nonlocal active, max_active
+        with guard:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with guard:
+            active -= 1
+        return [_sc(f"c-{query}")]
+
+    monkeypatch.setattr(adapter, "search", slow_search)
+    retriever = SiloRetriever(client=object())
+
+    threads = [threading.Thread(target=retriever.invoke, args=(f"q{i}",)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert max_active == 1
+    assert retriever.search_calls == 4
+    assert len(retriever.retrieved) == 4
+
+
+def test_retriever_stops_searching_after_max_calls(fake_search):
+    calls, results = fake_search
+    results.extend([[_sc(f"c{i}")] for i in range(5)])
+    retriever = SiloRetriever(client=object(), max_calls=2)
+
+    outputs = [retriever.invoke(f"q{i}") for i in range(5)]
+
+    assert len(calls) == 2  # 3回目以降は検索しない
+    assert [len(o) for o in outputs] == [1, 1, 0, 0, 0]
+    assert retriever.search_calls == 2
+    assert retriever.search_requests == 5
+    assert len(retriever.retrieved) == 2
+
+
 # --- run_langchain_agent ---------------------------------------------------------
 
 
@@ -147,6 +195,25 @@ def test_agent_answering_without_search_reports_zero_searches(fake_search):
     assert result.llm_calls == 1
     assert result.scored_chunks == []
     assert result.answer.citations == []
+
+
+def test_agent_caps_parallel_tool_calls_within_one_response(fake_search):
+    # 1回の応答で検索ツールを何度も同時に呼ぶ（実データで約50回）。recursion_limitでは止まらないので、
+    # Retriever側の上限で検索回数が制限されること。
+    calls, results = fake_search
+    results.extend([[_sc(f"c{i}")] for i in range(10)])
+    many = AIMessage(
+        content="",
+        tool_calls=[{"name": TOOL_NAME, "args": {"query": f"q{i}"}, "id": f"t{i}"} for i in range(6)],
+    )
+    model = _model(many, AIMessage(content="回答"))
+
+    result = run_langchain_agent(object(), "質問", top_k=5, max_searches=3, model=model)
+
+    assert result.searches == 3
+    assert result.requested_searches == 6
+    assert len(calls) == 3
+    assert result.answer.text == "回答"
 
 
 def test_agent_dedups_chunks_across_searches(fake_search):
