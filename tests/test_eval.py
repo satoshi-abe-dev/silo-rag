@@ -150,8 +150,9 @@ def test_run_eval_agent_uses_agent_result(monkeypatch):
 
     captured = {}
 
-    def fake_run_agent(client, question, *, top_k=None, grade_mode=None):
+    def fake_run_agent(client, question, *, top_k=None, grade_mode=None, first_query=None):
         captured["grade_mode"] = grade_mode
+        captured["first_query"] = first_query
         for _ in range(5):
             client.chat("agent", "x")
         return AgentResult(
@@ -164,9 +165,10 @@ def test_run_eval_agent_uses_agent_result(monkeypatch):
 
     monkeypatch.setattr(agent_module, "run_agent", fake_run_agent)
 
-    (result,) = run_eval(_JudgeClient(), _QA, pipeline="agent", grade_mode="strict")
+    (result,) = run_eval(_JudgeClient(), _QA, pipeline="agent", grade_mode="strict", first_query="rewrite")
 
     assert captured["grade_mode"] == "strict"
+    assert captured["first_query"] == "rewrite"
     assert result.attempts == 2
     assert result.llm_calls == 5
     assert result.retrieved_report_ids == ["RPT-009", "RPT-001"]
@@ -250,3 +252,15 @@ def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
     assert result.llm_calls == 4  # リランキング1回＋エージェント3回
     assert result.retrieved_report_ids == ["RPT-009", "RPT-001"]
     assert result.cited_gold
+
+
+def test_format_comparison_marks_rewrite_first_runs():
+    payload = _payload("agent", "strict", "qwen-7b", "qwen-7b", 0.7)
+    payload["run"]["first_query"] = "rewrite"
+    raw = _payload("agent", "strict", "qwen-7b", "qwen-7b", 0.6)
+    raw["run"]["first_query"] = "raw"
+
+    lines = format_comparison([("a", raw), ("b", payload)]).splitlines()
+
+    assert lines[2].startswith("| agent(strict) / qwen-7b |")
+    assert lines[3].startswith("| agent(strict,rewrite-first) / qwen-7b |")

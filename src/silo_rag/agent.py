@@ -11,6 +11,9 @@ retrieval.pyの`search()`（ノードC）とgeneration.pyの`answer_question()`�
                ↑         └─(不十分・上限未満)→ rewrite ─(書き直し失敗)→ select
                └──────────(新しいクエリ)──────────┘
 
+first_query="rewrite" のときは、START直後にplanノードが質問から検索クエリを作ってから検索する
+（"raw"なら質問をそのまま検索に使う）。
+
 selectは、複数回検索した場合だけ、集めた候補全体を元の質問でLLMに並べ直させる
 （retrieval.rerank()。1回だけならsearch()内で並べ直し済みなので何もしない）。
 
@@ -144,6 +147,7 @@ _GRADE_SYSTEM_PROMPTS: dict[str, str] = {
     ),
 }
 GRADE_MODES = tuple(_GRADE_SYSTEM_PROMPTS)
+FIRST_QUERY_MODES = ("raw", "rewrite")
 
 
 def _build_grade_prompt(
@@ -217,6 +221,22 @@ def _parse_rewrite_response(raw: str) -> str | None:
     return None
 
 
+_PLAN_SYSTEM_PROMPT = (
+    "あなたは社内ナレッジ検索の検索クエリを作る係です。"
+    "質問を読み、社内のプロジェクト知見レポートを検索するための検索クエリを1文だけ作ってください。"
+    "質問者が名乗っている所属部署名や、「教えてください」「ありますか」などの依頼の言い回しは、"
+    "クエリに含めないでください（探したいのは他部署を含む全部署の事例であり、検索に関係の無い言葉が"
+    "混ざるとキーワード検索が散るため）。"
+    "探したい事例のテーマ・施策の種類・失敗パターンなど、事例の中身を表す言葉だけで書いてください。"
+    "会話履歴が付いている場合は、質問中の指示語（「それ」「さっきの」等）の解決にだけ使ってください。"
+    "出力は検索クエリの文のみとし、説明や前置き・引用符は一切含めないでください。"
+)
+
+
+def _build_plan_prompt(question: str, history: list[tuple[str, str]] | None) -> str:
+    return "\n".join([*_build_history_lines(history), f"質問: {question}", "", "検索クエリ:"])
+
+
 def _normalize_query(query: str) -> str:
     return "".join(query.split()).lower()
 
@@ -235,25 +255,49 @@ def _build_rerank_query(question: str, history: list[tuple[str, str]] | None) ->
 # --- グラフ ---------------------------------------------------------------------
 
 
-def build_graph(client: LLMClient, *, max_attempts: int, top_k: int, grade_mode: str = "lenient"):
+def build_graph(
+    client: LLMClient,
+    *,
+    max_attempts: int,
+    top_k: int,
+    grade_mode: str = "lenient",
+    first_query: str = "raw",
+):
     """エージェントのグラフを組み立てて、コンパイル済みのものを返す。
 
     clientはクロージャで各ノードに渡す（LLMClientはシリアライズできないため、Stateには入れない）。
     grade_mode: 判定の厳しさ。"strict" か "lenient"（_GRADE_SYSTEM_PROMPTSのコメント参照）。
+    first_query: 1回目の検索に使うクエリ。"raw"は質問そのまま、"rewrite"は質問からLLMが作ったクエリ。
     """
     if grade_mode not in _GRADE_SYSTEM_PROMPTS:
         raise ValueError(f"grade_modeは{GRADE_MODES}のいずれかを指定してください: {grade_mode!r}")
+    if first_query not in FIRST_QUERY_MODES:
+        raise ValueError(f"first_queryは{FIRST_QUERY_MODES}のいずれかを指定してください: {first_query!r}")
     grade_system_prompt = _GRADE_SYSTEM_PROMPTS[grade_mode]
+
+    def plan(state: AgentState) -> dict:
+        # 1回目の検索クエリを、質問から作る。質問の文には、名乗りや依頼の言い回しなど検索に関係の無い
+        # 言葉が多く混ざり、BM25（文字2-gram）が散りやすい。失敗したら、質問そのままで検索する
+        # （retrieveがnext_query=Noneを見て従来の初回の動きに戻る）。
+        prompt = _build_plan_prompt(state["question"], state["history"])
+        try:
+            raw = client.chat(_PLAN_SYSTEM_PROMPT, prompt, temperature=0.0)
+        except LLMConnectionError:
+            return {"trace": [*state["trace"], "クエリ作成: LLM呼び出しに失敗。質問のまま検索"]}
+        query = _parse_rewrite_response(raw)
+        if query is None:
+            return {"trace": [*state["trace"], "クエリ作成: 応答が空。質問のまま検索"]}
+        return {"next_query": query, "trace": [*state["trace"], f"クエリ作成: 「{query}」"]}
 
     def retrieve(state: AgentState) -> dict:
         attempts = state["attempts"] + 1
-        if state["attempts"] == 0:
-            # 初回は元の質問で検索する。会話履歴があれば、search()側が履歴込みの
+        if state["next_query"] is None and state["attempts"] == 0:
+            # 質問そのままで検索する。会話履歴があれば、search()側が履歴込みの
             # 独立したクエリに書き換えてから検索する（従来のbaselineと同じ挙動）。
             query = state["question"]
             latest = search(client, query, top_k=top_k, filters=state["filters"], history=state["history"])
         else:
-            # 2回目以降のクエリはrewriteノードで履歴も踏まえて作っているので、historyは渡さない。
+            # planノード・rewriteノードが、履歴も踏まえてクエリを作っているので、historyは渡さない。
             query = state["next_query"] or state["question"]
             latest = search(client, query, top_k=top_k, filters=state["filters"])
         results_by_attempt = [latest, *state["results_by_attempt"]]
@@ -338,12 +382,14 @@ def build_graph(client: LLMClient, *, max_attempts: int, top_k: int, grade_mode:
         return {"answer": answer, "trace": [*state["trace"], "回答生成"]}
 
     graph = StateGraph(AgentState)
+    graph.add_node("plan", plan)
     graph.add_node("retrieve", retrieve)
     graph.add_node("grade", grade)
     graph.add_node("rewrite", rewrite)
     graph.add_node("select", select)
     graph.add_node("generate", generate)
-    graph.add_edge(START, "retrieve")
+    graph.add_edge(START, "plan" if first_query == "rewrite" else "retrieve")
+    graph.add_edge("plan", "retrieve")
     graph.add_edge("retrieve", "grade")
     graph.add_conditional_edges("grade", route_after_grade, {"rewrite": "rewrite", "select": "select"})
     graph.add_conditional_edges("rewrite", route_after_rewrite, {"retrieve": "retrieve", "select": "select"})
@@ -361,12 +407,15 @@ def run_agent(
     top_k: int | None = None,
     max_attempts: int | None = None,
     grade_mode: str | None = None,
+    first_query: str | None = None,
 ) -> AgentResult:
     """エージェントを1問ぶん実行する。引数の意味はretrieval.search()・generation.answer_question()と同じ。
 
     top_k: 判定・回答生成に使うチャンク数。Noneならconfig.retrieval.top_k_finalを使う。
     max_attempts: 検索の上限回数（初回を含む）。Noneならconfig.agent.max_attemptsを使う。
     grade_mode: 判定の厳しさ（"strict"／"lenient"）。Noneならconfig.agent.grade_modeを使う。
+    first_query: 1回目の検索クエリ（"raw"＝質問そのまま／"rewrite"＝質問からLLMが作る）。
+        Noneならconfig.agent.first_queryを使う。
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
@@ -375,7 +424,15 @@ def run_agent(
 
     resolved_mode = grade_mode if grade_mode is not None else config.agent.grade_mode
 
-    app = build_graph(client, max_attempts=resolved_max, top_k=resolved_top_k, grade_mode=resolved_mode)
+    resolved_first = first_query if first_query is not None else config.agent.first_query
+
+    app = build_graph(
+        client,
+        max_attempts=resolved_max,
+        top_k=resolved_top_k,
+        grade_mode=resolved_mode,
+        first_query=resolved_first,
+    )
     initial: AgentState = {
         "question": question,
         "history": history,
@@ -389,10 +446,10 @@ def run_agent(
         "answer": None,
         "trace": [],
     }
-    # 最大ステップ数は retrieve・grade が各max_attempts回、rewriteがmax_attempts-1回、select・generateが
-    # 各1回で 3*max_attempts+1。max_attemptsでループは必ず止まるが、万一の無限ループに備えて
-    # LangGraph側のステップ上限も、必要数ぎりぎりで掛けておく。
-    final = app.invoke(initial, config={"recursion_limit": 3 * resolved_max + 2})
+    # 最大ステップ数は plan（rewrite-firstのとき）が1回、retrieve・grade が各max_attempts回、rewriteが
+    # max_attempts-1回、select・generateが各1回で 3*max_attempts+2。max_attemptsでループは必ず止まるが、
+    # 万一の無限ループに備えてLangGraph側のステップ上限も、必要数ぎりぎりで掛けておく。
+    final = app.invoke(initial, config={"recursion_limit": 3 * resolved_max + 3})
     return AgentResult(
         answer=final["answer"],
         scored_chunks=final["scored_chunks"][:resolved_top_k],

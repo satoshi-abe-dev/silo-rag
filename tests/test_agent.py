@@ -11,6 +11,7 @@ import pytest
 import silo_rag.agent as agent_module
 from silo_rag.agent import (
     _GRADE_SYSTEM_PROMPTS,
+    _PLAN_SYSTEM_PROMPT,
     _REWRITE_SYSTEM_PROMPT,
     _build_rerank_query,
     _merge_chunks,
@@ -35,9 +36,17 @@ class _ScriptedAgentClient:
     """判定・書き直しの応答を、それぞれ台本どおりに順番に返すフェイク。
     台本の要素がLLMConnectionErrorのインスタンスなら、それを送出する。"""
 
-    def __init__(self, grades: list[object] | None = None, rewrites: list[object] | None = None):
+    def __init__(
+        self,
+        grades: list[object] | None = None,
+        rewrites: list[object] | None = None,
+        plans: list[object] | None = None,
+    ):
         self.grades = list(grades or [])
         self.rewrites = list(rewrites or [])
+        self.plans = list(plans or [])
+        self.plan_calls = 0
+        self.plan_prompts: list[str] = []
         self.grade_calls = 0
         self.rewrite_calls = 0
         self.grade_prompts: list[str] = []
@@ -47,6 +56,10 @@ class _ScriptedAgentClient:
             self.grade_calls += 1
             self.grade_prompts.append(user)
             item = self.grades.pop(0)
+        elif system == _PLAN_SYSTEM_PROMPT:
+            self.plan_calls += 1
+            self.plan_prompts.append(user)
+            item = self.plans.pop(0)
         elif system == _REWRITE_SYSTEM_PROMPT:
             self.rewrite_calls += 1
             item = self.rewrites.pop(0)
@@ -370,3 +383,91 @@ def test_grade_mode_selects_system_prompt(fake_pipeline, mode):
 def test_unknown_grade_mode_raises(fake_pipeline):
     with pytest.raises(ValueError):
         run_agent(_ScriptedAgentClient(), "質問", top_k=5, max_attempts=3, grade_mode="medium")
+
+
+# --- first_query="rewrite"（1回目から検索クエリを作る）-----------------------------------
+
+
+def test_rewrite_first_searches_with_planned_query_not_raw_question(fake_pipeline):
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"], plans=["予算策定 見直し 失敗事例"])
+
+    result = run_agent(
+        client,
+        "経営企画部です。予算策定の失敗事例を教えてください。",
+        top_k=5,
+        max_attempts=3,
+        first_query="rewrite",
+    )
+
+    (call,) = fake_pipeline.search_calls
+    assert call["query"] == "予算策定 見直し 失敗事例"
+    assert client.plan_calls == 1
+    assert result.tried_queries == ["予算策定 見直し 失敗事例"]
+    assert any("クエリ作成" in t for t in result.trace)
+
+
+def test_rewrite_first_does_not_pass_history_to_search(fake_pipeline):
+    # planノードが履歴を踏まえてクエリを作るので、search()側で二重に書き換えさせない。
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"], plans=["新商品ローンチの費用"])
+    history = [("新商品ローンチの失敗事例は？", "RPT-001が参考になります。")]
+
+    run_agent(client, "その費用は？", history=history, top_k=5, max_attempts=3, first_query="rewrite")
+
+    assert fake_pipeline.search_calls[0]["history"] is None
+    assert "Q: 新商品ローンチの失敗事例は？" in client.plan_prompts[0]
+
+
+@pytest.mark.parametrize("failure", [LLMConnectionError("接続失敗"), "   \n"])
+def test_rewrite_first_falls_back_to_raw_question_on_plan_failure(fake_pipeline, failure):
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"], plans=[failure])
+    history = [("前の質問", "前の回答")]
+
+    result = run_agent(client, "質問", history=history, top_k=5, max_attempts=3, first_query="rewrite")
+
+    (call,) = fake_pipeline.search_calls
+    assert call["query"] == "質問"
+    assert call["history"] == history  # 従来の初回と同じ（search()が履歴込みで書き換える）
+    assert result.answer is not None
+
+
+def test_rewrite_first_still_retries_with_rewrites(fake_pipeline):
+    fake_pipeline.results = [[_sc("a")], [_sc("b")]]
+    client = _ScriptedAgentClient(
+        grades=["INSUFFICIENT", "SUFFICIENT"], rewrites=["別の切り口"], plans=["最初のクエリ"]
+    )
+
+    result = run_agent(client, "質問", top_k=5, max_attempts=3, first_query="rewrite")
+
+    assert [c["query"] for c in fake_pipeline.search_calls] == ["最初のクエリ", "別の切り口"]
+    assert result.attempts == 2
+
+
+def test_raw_first_query_never_calls_plan(fake_pipeline):
+    fake_pipeline.results = [[_sc("a")]]
+    client = _ScriptedAgentClient(grades=["SUFFICIENT"])
+
+    run_agent(client, "質問", top_k=5, max_attempts=3, first_query="raw")
+
+    assert client.plan_calls == 0
+    assert fake_pipeline.search_calls[0]["query"] == "質問"
+
+
+def test_unknown_first_query_raises(fake_pipeline):
+    with pytest.raises(ValueError):
+        run_agent(_ScriptedAgentClient(), "質問", top_k=5, max_attempts=3, first_query="magic")
+
+
+def test_rewrite_first_loop_stops_at_max_attempts(fake_pipeline):
+    # planノードが増えても、recursion_limitに引っかからず、max_attemptsで止まること。
+    fake_pipeline.results = [[_sc("a")], [_sc("b")], [_sc("c")]]
+    client = _ScriptedAgentClient(
+        grades=["INSUFFICIENT"] * 3, rewrites=["クエリ2", "クエリ3"], plans=["クエリ1"]
+    )
+
+    result = run_agent(client, "質問", top_k=5, max_attempts=3, first_query="rewrite")
+
+    assert result.attempts == 3
+    assert result.answer is not None
