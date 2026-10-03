@@ -135,7 +135,7 @@ graph LR
 The optional nodes G and H sit outside the main flow, so they are not in the diagram.
 
 - **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). E (`--pipeline agent`) and F (the "agent" answer mode) call it only when selected
-- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `_build_citations` (a private function). E calls it only with `--pipeline langchain`
+- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `build_citations`. E calls it only with `--pipeline langchain`
 - Both are imported only when used. Plain mode works without LangGraph or LangChain installed
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
@@ -280,7 +280,7 @@ I didn't measure the 32B model with the stock LangChain agent (LM Studio's model
 
 ## Node H: LangChain integration
 
-`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). It calls functions from C and D (unlike G, it also uses D's private `_build_citations`).
+`src/silo_rag/langchain_adapter.py` (optional; `pip install -e ".[langchain]"`). Like G, it only calls the public functions of C and D.
 
 - **`SiloRetriever`**: exposes the existing hybrid search (`search()`) as a LangChain Retriever (`BaseRetriever`). The search internals are unchanged, and it can be used as a component in LangChain chains and agents
 - **`run_langchain_agent`**: uses that Retriever as a search tool for LangChain's stock `create_agent` and answers with it. It is the comparison target for the hand-built node G. The search cap is 3, a constant independent of G's `max_attempts`

@@ -116,7 +116,7 @@ def _build_prompt(
     return system, user
 
 
-def _build_citations(chunks: list[Chunk]) -> list[Citation]:
+def build_citations(chunks: list[Chunk]) -> list[Citation]:
     """入力チャンクのメタデータから、決定的に引用リストを組み立てる。
 
     LLMに引用リストを列挙させるのではなく、ここでチャンクのメタデータから直接構築する
@@ -162,5 +162,5 @@ def answer_question(
 
     system, user = _build_prompt(question, chunks, history)
     text = client.chat(system, user)
-    citations = _build_citations(chunks)
+    citations = build_citations(chunks)
     return Answer(text=text, citations=citations)

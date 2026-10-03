@@ -36,7 +36,7 @@ from langgraph.errors import GraphRecursionError
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from .config import load_config
-from .generation import Answer, _build_citations
+from .generation import Answer, build_citations
 from .retrieval import ScoredChunk, search
 
 TOOL_NAME = "search_reports"
@@ -245,7 +245,7 @@ def run_langchain_agent(
     except GraphRecursionError:
         chunks = _dedup_chunks(retriever.retrieved)
         return LangChainAgentResult(
-            answer=Answer(text=_NO_ANSWER, citations=_build_citations([sc.chunk for sc in chunks])),
+            answer=Answer(text=_NO_ANSWER, citations=build_citations([sc.chunk for sc in chunks])),
             scored_chunks=chunks,
             searches=retriever.search_calls,
             requested_searches=retriever.search_requests,
@@ -258,7 +258,7 @@ def run_langchain_agent(
     return LangChainAgentResult(
         answer=Answer(
             text=_message_text(final) if final is not None else "",
-            citations=_build_citations([sc.chunk for sc in chunks]),
+            citations=build_citations([sc.chunk for sc in chunks]),
         ),
         scored_chunks=chunks,
         searches=retriever.search_calls,
