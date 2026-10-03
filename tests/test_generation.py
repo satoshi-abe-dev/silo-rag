@@ -5,11 +5,11 @@ from __future__ import annotations
 
 from silo_rag.generation import (
     Citation,
-    _build_citations,
     _build_context_block,
     _build_history_block,
     _build_prompt,
     answer_question,
+    build_citations,
 )
 from silo_rag.ingest import Chunk
 
@@ -29,7 +29,7 @@ def test_build_citations_dedup_by_report_and_section():
         _chunk("RPT-001", "成果サマリー", "マーケティング部"),  # 同一レポートの別セクション -> 別件
         _chunk("RPT-002", "プロジェクト目的", "営業推進部"),
     ]
-    citations = _build_citations(chunks)
+    citations = build_citations(chunks)
     assert citations == [
         Citation(report_id="RPT-001", section="プロジェクト目的", dept="マーケティング部"),
         Citation(report_id="RPT-001", section="成果サマリー", dept="マーケティング部"),
@@ -38,7 +38,7 @@ def test_build_citations_dedup_by_report_and_section():
 
 
 def test_build_citations_empty_for_no_chunks():
-    assert _build_citations([]) == []
+    assert build_citations([]) == []
 
 
 def test_build_context_block_includes_metadata_header():

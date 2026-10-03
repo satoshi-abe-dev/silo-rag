@@ -135,7 +135,7 @@ graph LR
 オプションのノードG・Hは、メインフローの外にあるので、図には含めない。
 
 - **G**（`agent.py`）: C・Dの関数（`search`・`rerank`・`answer_question`）を呼ぶ。E（`--pipeline agent`）とF（回答方式「エージェント」）が、選ばれたときだけ呼ぶ
-- **H**（`langchain_adapter.py`）: Cの`search`と、Dの`Answer`・`_build_citations`（非公開の関数）を呼ぶ。Eが`--pipeline langchain`のときだけ呼ぶ
+- **H**（`langchain_adapter.py`）: Cの`search`と、Dの`Answer`・`build_citations`を呼ぶ。Eが`--pipeline langchain`のときだけ呼ぶ
 - どちらも、使うときだけ`import`する。LangGraph・LangChainが入っていなくても、通常方式は動く
 
 | ノード | モジュール | 役割 | 使用モデル（`config.toml`の`[ai]`） |
@@ -280,7 +280,7 @@ graph TD
 
 ## ノードH：LangChain連携
 
-`src/silo_rag/langchain_adapter.py`（オプション。`pip install -e ".[langchain]"`）。C・Dの関数を呼ぶ（Gと違い、Dの非公開関数`_build_citations`も使う）。
+`src/silo_rag/langchain_adapter.py`（オプション。`pip install -e ".[langchain]"`）。Gと同じく、C・Dの公開関数だけを呼ぶ。
 
 - **`SiloRetriever`**: 自前のハイブリッド検索（`search()`）を、LangChainのRetriever（`BaseRetriever`）の規格に合わせて公開する。検索の中身はそのままで、LangChainのチェーンやエージェントから部品として使える
 - **`run_langchain_agent`**: 上のRetrieverを検索ツールにして、LangChain既製の`create_agent`で回答する。自作のGとの比較対象。検索の上限は3回で、Gの`max_attempts`とは独立した定数
