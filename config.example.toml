@@ -21,6 +21,9 @@ max_tokens = 2048
 vector_weight = 0.5
 top_k_candidates = 20
 top_k_final = 5
+# 検索前に、質問からLLMが検索に向いたクエリを作るか。false＝質問のまま検索（既定）。
+# 7Bでは効いたが、32Bでは効果が見えなかった。LLM呼び出しが質問ごとに1回増える。
+rewrite_query = false
 
 # --------------------------------------
 [agent]

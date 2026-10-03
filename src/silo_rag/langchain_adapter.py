@@ -124,7 +124,8 @@ class SiloRetriever(BaseRetriever):
             self.search_requests += 1
             if self.max_calls is not None and self.search_calls >= self.max_calls:
                 return []
-            scored = search(self.client, query, top_k=self.top_k, filters=self.filters)
+            # ツールに渡るクエリは、エージェントのLLMがすでに作ったものなので、検索側で書き直さない。
+            scored = search(self.client, query, top_k=self.top_k, filters=self.filters, rewrite_query=False)
             self.search_calls += 1
             self.retrieved.extend(scored)
         return [_to_document(sc) for sc in scored]

@@ -128,7 +128,7 @@ _QA = [
 
 
 def test_run_eval_baseline_counts_llm_calls_but_not_judge(monkeypatch):
-    def fake_search(client, question, *, top_k=None):
+    def fake_search(client, question, *, top_k=None, rewrite_query=None):
         client.chat("rerank", "x")  # 検索内のLLM呼び出し（リランキング）の代わり
         return [_scored("RPT-001")]
 
@@ -147,6 +147,24 @@ def test_run_eval_baseline_counts_llm_calls_but_not_judge(monkeypatch):
     assert result.llm_calls == 2  # 検索1回＋回答1回。judgeの採点は数えない
     assert result.judge_score == 4
     assert judge.models[-1] == "judge-32b"
+
+
+@pytest.mark.parametrize("flag", [True, False, None])
+def test_run_eval_baseline_passes_rewrite_query_to_search(monkeypatch, flag):
+    seen: list[bool | None] = []
+
+    def fake_search(client, question, *, top_k=None, rewrite_query=None):
+        seen.append(rewrite_query)
+        return [_scored("RPT-001")]
+
+    monkeypatch.setattr(eval_module, "search", fake_search)
+    monkeypatch.setattr(
+        eval_module, "answer_question", lambda client, q, chunks: Answer(text="答え", citations=[])
+    )
+
+    run_eval(_JudgeClient(), _QA, rewrite_query=flag)
+
+    assert seen == [flag]
 
 
 def test_run_eval_agent_uses_agent_result(monkeypatch):
@@ -271,6 +289,18 @@ def test_format_comparison_marks_rewrite_first_runs():
     assert lines[3].startswith("| agent(strict,rewrite-first) / qwen-7b |")
 
 
+def test_format_comparison_marks_baseline_runs_that_rewrite_the_query():
+    plain = _payload("baseline", None, "qwen-7b", "qwen-7b", 0.6)
+    plain["run"]["rewrite_query"] = False
+    rewritten = _payload("baseline", None, "qwen-7b", "qwen-7b", 0.9)
+    rewritten["run"]["rewrite_query"] = True
+
+    lines = format_comparison([("a", plain), ("b", rewritten)]).splitlines()
+
+    assert lines[2].startswith("| baseline / qwen-7b |")
+    assert lines[3].startswith("| baseline(rewrite-query) / qwen-7b |")
+
+
 def test_format_comparison_marks_single_search_runs():
     payload = _payload("agent", "lenient", "qwen-7b", "qwen-7b", 0.7)
     payload["run"]["first_query"] = "rewrite"
@@ -347,6 +377,7 @@ def test_resolve_max_attempts_falls_back_only_when_not_requested():
 def test_default_result_names_differ_by_every_setting():
     names = {
         _default_result_name("baseline", None, None, None),
+        _default_result_name("baseline", None, None, None, True),
         _default_result_name("agent", "lenient", "rewrite", 1),
         _default_result_name("agent", "lenient", "rewrite", 3),
         _default_result_name("agent", "lenient", "raw", 3),
@@ -354,7 +385,9 @@ def test_default_result_names_differ_by_every_setting():
         _default_result_name("langchain", None, None, 2),
         _default_result_name("langchain", None, None, 3),
     }
-    assert len(names) == 7  # どれも違う名前（上限だけが違う実行も、上書きし合わない）
+    assert len(names) == 8  # どれも違う名前（上限だけが違う実行も、上書きし合わない）
+    # 書き直しをオンにしたbaselineは、通常のbaselineの結果ファイルを上書きしない
+    assert _default_result_name("baseline", None, None, None) == "eval_results.json"
 
 
 def test_format_comparison_distinguishes_runs_that_differ_only_in_the_cap():

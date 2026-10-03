@@ -77,6 +77,11 @@ class RetrievalConfig:
     vector_weight: float = 0.5
     top_k_candidates: int = 20
     top_k_final: int = 5
+    # 検索前に、質問からLLMが検索に向いたクエリを作るか（retrieval.plan_query）。
+    # 既定はFalse（質問のまま検索）。
+    # 7Bでは、これが最も効いたが、32Bでは効果が見えなかった。LLM呼び出しが質問ごとに1回増える。
+    # README「ノードG」の評価を参照。
+    rewrite_query: bool = False
 
 
 @dataclass
@@ -103,6 +108,16 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
 
 
+def _to_bool(text: str) -> bool:
+    """環境変数の文字列を真偽値にする。bool("false")は真になるので、文字列で判定する。"""
+    value = text.strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off", ""):
+        return False
+    raise ValueError(f"真偽値として解釈できません: {text!r}")
+
+
 _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "SILORAG_AI_BASE_URL": ("ai", "base_url", str),
     "SILORAG_AI_API_KEY": ("ai", "api_key", str),
@@ -114,6 +129,7 @@ _ENV_MAP: dict[str, tuple[str, str, Callable[[str], object]]] = {
     "SILORAG_RETRIEVAL_VECTOR_WEIGHT": ("retrieval", "vector_weight", float),
     "SILORAG_RETRIEVAL_TOP_K_CANDIDATES": ("retrieval", "top_k_candidates", int),
     "SILORAG_RETRIEVAL_TOP_K_FINAL": ("retrieval", "top_k_final", int),
+    "SILORAG_RETRIEVAL_REWRITE_QUERY": ("retrieval", "rewrite_query", _to_bool),
     "SILORAG_AGENT_MAX_ATTEMPTS": ("agent", "max_attempts", int),
     "SILORAG_AGENT_GRADE_MODE": ("agent", "grade_mode", str),
     "SILORAG_AGENT_FIRST_QUERY": ("agent", "first_query", str),
