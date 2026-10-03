@@ -82,6 +82,7 @@ def search(
     top_k: int | None = None,
     filters: dict[str, str] | None = None,
     history: list[tuple[str, str]] | None = None,
+    rewrite_query: bool | None = None,
 ) -> list[ScoredChunk]:
     """ハイブリッド検索（BM25＋ベクトル）→ スコア統合 → LLMリランキングを行う。
 
@@ -89,12 +90,21 @@ def search(
     filters: メタデータの完全一致フィルタ（例: {"dept": "マーケティング部"}）。複数キー指定時はAND条件。
     history: 直前までの会話（質問, 回答本文）のリスト。指定すると、検索前にqueryを
         履歴込みで独立した検索クエリに書き換える（フォローアップ質問での検索精度向上のため）。
+    rewrite_query: Trueなら、検索前に、質問からLLMが検索に向いたクエリを作り（plan_query）、そのクエリで
+        BM25・ベクトル検索・並べ直しを行う（名乗りや依頼の言い回しを除く）。履歴があれば、指示語の解決も
+        同じ呼び出しで行う。作成に失敗したら、従来どおりの書き換え（履歴があるときだけ）に戻る。
+        Noneならconfig.retrieval.rewrite_query（既定False）を使う。
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
     top_k_candidates = config.retrieval.top_k_candidates
     vector_weight = config.retrieval.vector_weight
-    query = _resolve_query(client, query, history) if history else query
+    use_rewrite = config.retrieval.rewrite_query if rewrite_query is None else rewrite_query
+    planned = plan_query(client, query, history)[0] if use_rewrite else None
+    if planned is not None:
+        query = planned
+    elif history:
+        query = _resolve_query(client, query, history)
 
     import chromadb
 
@@ -198,6 +208,67 @@ def _resolve_query(client: LLMClient, question: str, history: list[tuple[str, st
     except LLMConnectionError:
         return question
     return rewritten.strip() or question
+
+
+# --- 検索クエリの作成（質問から、検索に向いたクエリを作る） -----------------------------
+
+
+def build_history_lines(history: list[tuple[str, str]] | None) -> list[str]:
+    """会話履歴を、プロンプトに埋め込む行のリストにする（直近の数往復だけ。履歴が無ければ空）。"""
+    if not history:
+        return []
+    lines = ["会話履歴（指示語の解決にのみ使う）:"]
+    for q, a in history[-_MAX_HISTORY_TURNS:]:
+        truncated = a if len(a) <= _HISTORY_ANSWER_TRUNCATE else a[:_HISTORY_ANSWER_TRUNCATE] + "…"
+        lines.append(f"Q: {q}")
+        lines.append(f"A: {truncated}")
+    lines.append("")
+    return lines
+
+
+PLAN_SYSTEM_PROMPT = (
+    "あなたは社内ナレッジ検索の検索クエリを作る係です。"
+    "質問を読み、社内のプロジェクト知見レポートを検索するための検索クエリを1文だけ作ってください。"
+    "質問者が名乗っている所属部署名や、「教えてください」「ありますか」などの依頼の言い回しは、"
+    "クエリに含めないでください（探したいのは他部署を含む全部署の事例であり、検索に関係の無い言葉が"
+    "混ざるとキーワード検索が散るため）。"
+    "探したい事例のテーマ・施策の種類・失敗パターンなど、事例の中身を表す言葉だけで書いてください。"
+    "会話履歴が付いている場合は、質問中の指示語（「それ」「さっきの」等）の解決にだけ使ってください。"
+    "出力は検索クエリの文のみとし、説明や前置き・引用符は一切含めないでください。"
+)
+
+
+def build_plan_prompt(question: str, history: list[tuple[str, str]] | None) -> str:
+    return "\n".join([*build_history_lines(history), f"質問: {question}", "", "検索クエリ:"])
+
+
+def parse_query_response(raw: str) -> str | None:
+    """最初の空でない行を、前後の引用符を除いてクエリとして取り出す。空ならNone。"""
+    for line in raw.splitlines():
+        query = line.strip().strip("「」\"'").strip()
+        if query:
+            return query
+    return None
+
+
+def plan_query(
+    client: LLMClient, question: str, history: list[tuple[str, str]] | None = None
+) -> tuple[str | None, str | None]:
+    """質問から、検索に向いたクエリをLLMに作らせる。(クエリ, 失敗の理由)を返す。
+
+    質問文には、名乗りや依頼の言い回しなど、検索に関係の無い言葉が多く混ざり、BM25（文字2-gram）が
+    散りやすい。成功すれば(クエリ, None)、失敗（LLM呼び出しの失敗・応答が空）なら(None, 理由)を返す。
+    失敗しても例外にはしない（呼び出し側が、質問のまま検索に戻れるように）。
+    """
+    prompt = build_plan_prompt(question, history)
+    try:
+        raw = client.chat(PLAN_SYSTEM_PROMPT, prompt, temperature=0.0)
+    except LLMConnectionError:
+        return None, "LLM呼び出しに失敗"
+    query = parse_query_response(raw)
+    if query is None:
+        return None, "応答が空"
+    return query, None
 
 
 # --- BM25候補検索 -------------------------------------------------------------

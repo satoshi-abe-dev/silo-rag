@@ -11,18 +11,16 @@ import pytest
 import silo_rag.agent as agent_module
 from silo_rag.agent import (
     _GRADE_SYSTEM_PROMPTS,
-    _PLAN_SYSTEM_PROMPT,
     _REWRITE_SYSTEM_PROMPT,
     _build_rerank_query,
     _merge_chunks,
     _parse_grade_response,
-    _parse_rewrite_response,
     run_agent,
 )
 from silo_rag.generation import Answer
 from silo_rag.ingest import Chunk
 from silo_rag.llm_client import LLMConnectionError
-from silo_rag.retrieval import ScoredChunk
+from silo_rag.retrieval import PLAN_SYSTEM_PROMPT, ScoredChunk, parse_query_response
 
 
 def _sc(chunk_id: str, score: float = 1.0) -> ScoredChunk:
@@ -56,7 +54,7 @@ class _ScriptedAgentClient:
             self.grade_calls += 1
             self.grade_prompts.append(user)
             item = self.grades.pop(0)
-        elif system == _PLAN_SYSTEM_PROMPT:
+        elif system == PLAN_SYSTEM_PROMPT:
             self.plan_calls += 1
             self.plan_prompts.append(user)
             item = self.plans.pop(0)
@@ -98,8 +96,16 @@ def fake_pipeline(monkeypatch):
 
     rec = _Recorder()
 
-    def fake_search(client, query, *, top_k=None, filters=None, history=None):
-        rec.search_calls.append({"query": query, "top_k": top_k, "filters": filters, "history": history})
+    def fake_search(client, query, *, top_k=None, filters=None, history=None, rewrite_query=None):
+        rec.search_calls.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                "filters": filters,
+                "history": history,
+                "rewrite_query": rewrite_query,
+            }
+        )
         return rec.results.pop(0) if rec.results else []
 
     def fake_answer_question(client, question, chunks, history=None):
@@ -371,8 +377,8 @@ def test_parse_grade_response(raw, expected):
         ("   \n", None),
     ],
 )
-def test_parse_rewrite_response(raw, expected):
-    assert _parse_rewrite_response(raw) == expected
+def test_parse_query_response(raw, expected):
+    assert parse_query_response(raw) == expected
 
 
 @pytest.mark.parametrize("mode", ["strict", "lenient"])

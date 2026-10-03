@@ -137,8 +137,10 @@ def _judge_answer(
     return int(stripped) if stripped in {"1", "2", "3", "4", "5"} else None
 
 
-def _answer_baseline(client, question: str, top_k: int | None) -> tuple[list[ScoredChunk], Answer, int]:
-    scored = search(client, question, top_k=top_k)
+def _answer_baseline(
+    client, question: str, top_k: int | None, rewrite_query: bool | None
+) -> tuple[list[ScoredChunk], Answer, int]:
+    scored = search(client, question, top_k=top_k, rewrite_query=rewrite_query)
     answer = answer_question(client, question, [sc.chunk for sc in scored])
     return scored, answer, 1
 
@@ -153,6 +155,7 @@ def run_eval(
     first_query: str | None = None,
     max_attempts: int | None = None,
     judge_model: str | None = None,
+    rewrite_query: bool | None = None,
 ) -> list[QAResult]:
     """pipeline: "baseline"（search→answer_questionを直接呼ぶ）、"agent"（agent.run_agent）、
         "langchain"（langchain_adapter.run_langchain_agent。LLMのツール呼び出しで検索する既製エージェント）。
@@ -162,6 +165,8 @@ def run_eval(
         langchainはlangchain_adapter.DEFAULT_MAX_SEARCHES。
     judge_model: LLM-as-judgeの採点に使うモデル。Noneならconfig.ai.llm_model（回答と同じモデル）。
         回答モデルを変えて比較するときは、採点モデルを固定しないとjudgeスコアが比べられない。
+    rewrite_query: baselineのsearch()が、検索前に質問から検索クエリを作るか（retrieval.plan_query）。
+        Noneならconfig.retrieval.rewrite_query。agent・langchainは、自分でクエリを作るので使わない。
     """
     if pipeline not in PIPELINES:
         raise ValueError(f"pipelineは{PIPELINES}のいずれかを指定してください: {pipeline!r}")
@@ -196,7 +201,7 @@ def run_eval(
             )
             scored, answer, attempts = agent_result.scored_chunks, agent_result.answer, agent_result.attempts
         else:
-            scored, answer, attempts = _answer_baseline(counting, qa["question"], top_k)
+            scored, answer, attempts = _answer_baseline(counting, qa["question"], top_k, rewrite_query)
         elapsed = time.perf_counter() - started
 
         retrieved_report_ids = _dedup_report_ids(scored)
@@ -321,11 +326,16 @@ def _resolve_max_attempts(pipeline: str, requested: int | None, configured: int)
 
 
 def _default_result_name(
-    pipeline: str, grade_mode: str | None, first_query: str | None, max_attempts: int | None
+    pipeline: str,
+    grade_mode: str | None,
+    first_query: str | None,
+    max_attempts: int | None,
+    rewrite_query: bool = False,
 ) -> str:
     """--outを省略したときの結果ファイル名。条件が違う実行が上書きし合わないよう、上限回数も入れる。"""
     if pipeline == "baseline":
-        return "eval_results.json"
+        # 書き直しをオンにした実行が、通常の結果（eval_results.json）を上書きしないようにする。
+        return "eval_results_baseline_rewrite.json" if rewrite_query else "eval_results.json"
     if pipeline == "langchain":
         return f"eval_results_langchain_max{max_attempts}.json"
     rewrite = "_rewrite" if first_query == "rewrite" else ""
@@ -341,6 +351,8 @@ def _run_label(payload: dict, fallback: str) -> str:
         detail.append(run["grade_mode"])
     if run.get("first_query") == "rewrite":
         detail.append("rewrite-first")  # 質問そのまま（raw）の実行には印を付けない
+    if run.get("rewrite_query"):
+        detail.append("rewrite-query")  # baselineで、search()が検索前にクエリを作った実行
     if run.get("max_attempts") is not None:
         # 検索の上限回数。違う上限の実行が、同じ名前になって区別できなくならないよう、必ず出す。
         detail.append(f"max={run['max_attempts']}")
@@ -392,6 +404,12 @@ def main() -> None:
         help="agent・langchainの検索の上限回数。Noneなら、agentはconfig.agent.max_attempts、langchainは3回",
     )
     parser.add_argument(
+        "--rewrite-query",
+        action="store_true",
+        help="baselineのとき、検索前に質問から検索クエリを作る（retrieval.plan_query）。"
+        "指定しなければconfig.retrieval.rewrite_query。agent・langchainでは指定できない",
+    )
+    parser.add_argument(
         "--judge-model",
         default=None,
         help="LLM-as-judgeの採点モデル。Noneならconfig.ai.llm_model。回答モデルを変えて比べるときは固定する",
@@ -417,6 +435,9 @@ def main() -> None:
         print(format_comparison(payloads))
         return
 
+    if args.rewrite_query and args.pipeline != "baseline":
+        parser.error("--rewrite-queryはbaselineのときだけ指定できます（agentは--first-queryで選びます）")
+
     qa_pairs = _load_qa_pairs(args.qa_file)
     config = load_config()
     is_agent = args.pipeline == "agent"
@@ -424,9 +445,14 @@ def main() -> None:
     first_query = (args.first_query or config.agent.first_query) if is_agent else None
     max_attempts = _resolve_max_attempts(args.pipeline, args.max_attempts, config.agent.max_attempts)
     judge_model = args.judge_model or config.ai.llm_model
+    # baselineだけが使う。実際に使う値を、結果のメタデータに残す（設定で既にオンの実行も区別するため）。
+    is_baseline = args.pipeline == "baseline"
+    rewrite_query = (args.rewrite_query or config.retrieval.rewrite_query) if is_baseline else None
     out = args.out
     if out is None:
-        out = EVAL_DIR / _default_result_name(args.pipeline, grade_mode, first_query, max_attempts)
+        out = EVAL_DIR / _default_result_name(
+            args.pipeline, grade_mode, first_query, max_attempts, bool(rewrite_query)
+        )
 
     with LLMClient(config.ai) as client:
         if not client.ping():
@@ -442,6 +468,7 @@ def main() -> None:
             first_query=first_query,
             max_attempts=max_attempts,
             judge_model=judge_model,
+            rewrite_query=rewrite_query,
         )
 
     summary = summarize(results)
@@ -456,6 +483,7 @@ def main() -> None:
         "grade_mode": grade_mode,
         "first_query": first_query,
         "max_attempts": max_attempts,
+        "rewrite_query": rewrite_query,
         "top_k": args.top_k if args.top_k is not None else config.retrieval.top_k_final,
     }
     payload = {"run": run, "summary": summary, "results": [asdict(r) for r in results]}

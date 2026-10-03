@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from silo_rag.config import AgentConfig, load_config
+from silo_rag.config import AgentConfig, RetrievalConfig, load_config
 
 
 def test_agent_defaults_are_the_best_measured_small_model_setting():
@@ -26,6 +26,31 @@ def test_agent_settings_can_be_overridden_by_environment(monkeypatch, tmp_path):
     agent = load_config(empty_toml).agent
 
     assert (agent.first_query, agent.max_attempts, agent.grade_mode) == ("raw", 3, "strict")
+
+
+def test_rewrite_query_is_off_by_default():
+    # 7Bでは効いたが、32Bでは効果が見えなかったので、既定は質問のまま検索する。
+    assert RetrievalConfig().rewrite_query is False
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("true", True), ("1", True), ("On", True), ("false", False), ("0", False), ("off", False)],
+)
+def test_rewrite_query_can_be_set_by_environment(monkeypatch, tmp_path, env_value, expected):
+    # 環境変数は文字列なので、"false"が真にならないこと。
+    empty_toml = tmp_path / "empty.toml"
+    empty_toml.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SILORAG_RETRIEVAL_REWRITE_QUERY", env_value)
+
+    assert load_config(empty_toml).retrieval.rewrite_query is expected
+
+
+def test_rewrite_query_can_be_set_in_toml(tmp_path):
+    toml = tmp_path / "config.toml"
+    toml.write_text("[retrieval]\nrewrite_query = true\n", encoding="utf-8")
+
+    assert load_config(toml).retrieval.rewrite_query is True
 
 
 @pytest.mark.parametrize("env_value", ["1", "3"])

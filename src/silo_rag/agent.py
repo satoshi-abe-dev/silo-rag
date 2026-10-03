@@ -43,12 +43,10 @@ from langgraph.graph import END, START, StateGraph
 from .config import load_config
 from .generation import Answer, answer_question
 from .llm_client import LLMClient, LLMConnectionError
-from .retrieval import ScoredChunk, rerank, search
+from .retrieval import ScoredChunk, build_history_lines, parse_query_response, plan_query, rerank, search
 
 # 判定プロンプトに載せるチャンク本文の最大文字数（判定には要点が分かれば足りる）。
 _GRADE_CHUNK_TRUNCATE = 300
-_MAX_HISTORY_TURNS = 3
-_HISTORY_ANSWER_TRUNCATE = 200
 
 
 class AgentState(TypedDict):
@@ -104,19 +102,6 @@ def _merge_chunks(results_by_attempt: list[list[ScoredChunk]]) -> list[ScoredChu
     return merged
 
 
-def _build_history_lines(history: list[tuple[str, str]] | None) -> list[str]:
-    """会話履歴を、プロンプトに埋め込む行のリストにする（直近の数往復だけ。履歴が無ければ空）。"""
-    if not history:
-        return []
-    lines = ["会話履歴（指示語の解決にのみ使う）:"]
-    for q, a in history[-_MAX_HISTORY_TURNS:]:
-        truncated = a if len(a) <= _HISTORY_ANSWER_TRUNCATE else a[:_HISTORY_ANSWER_TRUNCATE] + "…"
-        lines.append(f"Q: {q}")
-        lines.append(f"A: {truncated}")
-    lines.append("")
-    return lines
-
-
 # --- 判定（根拠は十分か） ---------------------------------------------------------
 
 _GRADE_PROMPT_HEAD = (
@@ -155,7 +140,7 @@ def _build_grade_prompt(
 ) -> str:
     # フォローアップ質問（「その費用は？」等）は、履歴が無いと何についての質問か判定できない
     # （codexレビューで指摘され、修正した。検索・書き直し・回答生成と同じく履歴を渡す）。
-    lines = [*_build_history_lines(history), f"質問: {question}", "", "検索で見つかった資料の抜粋:"]
+    lines = [*build_history_lines(history), f"質問: {question}", "", "検索で見つかった資料の抜粋:"]
     for i, sc in enumerate(chunks, start=1):
         meta = sc.chunk.metadata
         text = sc.chunk.text
@@ -202,7 +187,7 @@ _REWRITE_SYSTEM_PROMPT = (
 def _build_rewrite_prompt(
     question: str, tried_queries: list[str], history: list[tuple[str, str]] | None
 ) -> str:
-    lines = _build_history_lines(history)
+    lines = build_history_lines(history)
     lines.append(f"質問: {question}")
     lines.append("")
     lines.append("これまでに試したクエリ:")
@@ -210,31 +195,6 @@ def _build_rewrite_prompt(
     lines.append("")
     lines.append("新しい検索クエリ:")
     return "\n".join(lines)
-
-
-def _parse_rewrite_response(raw: str) -> str | None:
-    """最初の空でない行を、前後の引用符を除いてクエリとして取り出す。空ならNone。"""
-    for line in raw.splitlines():
-        query = line.strip().strip("「」\"'").strip()
-        if query:
-            return query
-    return None
-
-
-_PLAN_SYSTEM_PROMPT = (
-    "あなたは社内ナレッジ検索の検索クエリを作る係です。"
-    "質問を読み、社内のプロジェクト知見レポートを検索するための検索クエリを1文だけ作ってください。"
-    "質問者が名乗っている所属部署名や、「教えてください」「ありますか」などの依頼の言い回しは、"
-    "クエリに含めないでください（探したいのは他部署を含む全部署の事例であり、検索に関係の無い言葉が"
-    "混ざるとキーワード検索が散るため）。"
-    "探したい事例のテーマ・施策の種類・失敗パターンなど、事例の中身を表す言葉だけで書いてください。"
-    "会話履歴が付いている場合は、質問中の指示語（「それ」「さっきの」等）の解決にだけ使ってください。"
-    "出力は検索クエリの文のみとし、説明や前置き・引用符は一切含めないでください。"
-)
-
-
-def _build_plan_prompt(question: str, history: list[tuple[str, str]] | None) -> str:
-    return "\n".join([*_build_history_lines(history), f"質問: {question}", "", "検索クエリ:"])
 
 
 def _normalize_query(query: str) -> str:
@@ -279,14 +239,9 @@ def build_graph(
         # 1回目の検索クエリを、質問から作る。質問の文には、名乗りや依頼の言い回しなど検索に関係の無い
         # 言葉が多く混ざり、BM25（文字2-gram）が散りやすい。失敗したら、質問そのままで検索する
         # （retrieveがnext_query=Noneを見て従来の初回の動きに戻る）。
-        prompt = _build_plan_prompt(state["question"], state["history"])
-        try:
-            raw = client.chat(_PLAN_SYSTEM_PROMPT, prompt, temperature=0.0)
-        except LLMConnectionError:
-            return {"trace": [*state["trace"], "クエリ作成: LLM呼び出しに失敗。質問のまま検索"]}
-        query = _parse_rewrite_response(raw)
+        query, failure = plan_query(client, state["question"], state["history"])
         if query is None:
-            return {"trace": [*state["trace"], "クエリ作成: 応答が空。質問のまま検索"]}
+            return {"trace": [*state["trace"], f"クエリ作成: {failure}。質問のまま検索"]}
         return {"next_query": query, "trace": [*state["trace"], f"クエリ作成: 「{query}」"]}
 
     def retrieve(state: AgentState) -> dict:
@@ -295,11 +250,18 @@ def build_graph(
             # 質問そのままで検索する。会話履歴があれば、search()側が履歴込みの
             # 独立したクエリに書き換えてから検索する（従来のbaselineと同じ挙動）。
             query = state["question"]
-            latest = search(client, query, top_k=top_k, filters=state["filters"], history=state["history"])
+            latest = search(
+                client,
+                query,
+                top_k=top_k,
+                filters=state["filters"],
+                history=state["history"],
+                rewrite_query=False,
+            )
         else:
             # planノード・rewriteノードが、履歴も踏まえてクエリを作っているので、historyは渡さない。
             query = state["next_query"] or state["question"]
-            latest = search(client, query, top_k=top_k, filters=state["filters"])
+            latest = search(client, query, top_k=top_k, filters=state["filters"], rewrite_query=False)
         results_by_attempt = [latest, *state["results_by_attempt"]]
         return {
             "attempts": attempts,
@@ -349,7 +311,7 @@ def build_graph(
             raw = client.chat(_REWRITE_SYSTEM_PROMPT, prompt, temperature=0.0)
         except LLMConnectionError:
             return {"next_query": None, "trace": [*state["trace"], "書き直し: LLM呼び出しに失敗。打ち切り"]}
-        query = _parse_rewrite_response(raw)
+        query = parse_query_response(raw)
         if query is None:
             return {"next_query": None, "trace": [*state["trace"], "書き直し: 応答が空。打ち切り"]}
         if _normalize_query(query) in {_normalize_query(q) for q in state["tried_queries"]}:

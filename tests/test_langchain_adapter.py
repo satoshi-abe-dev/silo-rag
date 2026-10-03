@@ -66,8 +66,16 @@ def fake_search(monkeypatch):
     calls: list[dict] = []
     results: list[list[ScoredChunk]] = []
 
-    def _search(client, query, *, top_k=None, filters=None, history=None):
-        calls.append({"query": query, "top_k": top_k, "filters": filters, "history": history})
+    def _search(client, query, *, top_k=None, filters=None, history=None, rewrite_query=None):
+        calls.append(
+            {
+                "query": query,
+                "top_k": top_k,
+                "filters": filters,
+                "history": history,
+                "rewrite_query": rewrite_query,
+            }
+        )
         return results.pop(0) if results else []
 
     monkeypatch.setattr(adapter, "search", _search)
@@ -89,7 +97,16 @@ def test_retriever_converts_chunks_to_documents_and_records(fake_search):
     assert docs[1].metadata["dept"] == "商品開発部"
     assert docs[0].metadata["chunk_id"] == "c1"
     assert docs[0].metadata["score"] == 0.9
-    assert calls == [{"query": "検索クエリ", "top_k": 2, "filters": {"dept": "営業推進部"}, "history": None}]
+    # ツールに渡るクエリはLLMが作ったものなので、検索側での書き直しは必ず切る（設定でオンにされていても）。
+    assert calls == [
+        {
+            "query": "検索クエリ",
+            "top_k": 2,
+            "filters": {"dept": "営業推進部"},
+            "history": None,
+            "rewrite_query": False,
+        }
+    ]
     assert retriever.search_calls == 1
     assert [sc.chunk.chunk_id for sc in retriever.retrieved] == ["c1", "c2"]
 
