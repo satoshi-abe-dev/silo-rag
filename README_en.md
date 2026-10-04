@@ -196,7 +196,7 @@ The requirement to "bring graph engineering into the development process" (see �
 - **Parallel implementation**: nodes with no dependency on each other (C and D) were handed to two Agents (subagents) at the same time
 - **Independent testing**: fakes (`_FakeVLMClient`, `_ScriptedClient`) stand in for dependencies, so every node can be tested on its own with no live LLM
 - **Bug localization**: after each node, an independent review by the local `codex` CLI (a different vendor's AI) was a required gate; findings were fixed and re-reviewed before moving on. It caught `BM25Okapi`'s negative-IDF bug in `retrieval.py` and a data leak in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`)
-- **Reusability**: since each node is independent, rewriting one later doesn't touch the others
+- **Easy to change**: each node exposes only its entry functions, so rewriting a node's internals doesn't affect the nodes that call it
 - Being able to decide a build order isn't unique to graph engineering. What paid off was "the part that can be parallelized (C and D)" and "boundaries narrow enough to review in isolation"
 
 ### Node dependencies (DAG)
@@ -218,6 +218,7 @@ graph LR
 
 - **Connections**: A to B goes through files (`data/synth_reports/`; zero import coupling). B to C/D goes through ChromaDB (they import only the `Chunk` type). E and F call C's and D's functions directly (there is no dependency between E and F; F also uses A's constants `DEPARTMENTS` and `PROJECT_TYPES`)
 - Each node hides its internals; only entry points such as `search()` and `answer_question()` are exposed
+- The optional G and H are not in this picture. **G and H depend on C and D** (they call functions of C and D). E and F use G (and E also H) only when needed. The direction is C/D → G/H → E/F, with no cycle
 - **The only independent pair is C and D.** Both depend on B, not on each other. Every other pair has a dependency and has to wait for it, so they can't be built in parallel. **C and D were actually implemented in parallel by two Agents**
 - "Acyclic" only guarantees a valid build order exists; it's separate from independence. A single straight chain (A→B→C→D→E→F) is acyclic yet offers zero parallelism. The payoff here came from the graph's shape: no arrow happens to connect C and D
 
@@ -229,7 +230,7 @@ graph LR
 
 ## Node G: the LangGraph agent
 
-A new node (`src/silo_rag/agent.py`) that **only calls the public functions** of nodes C and D. It doesn't touch the insides of C or D, and C and D stay independent of each other, so the **module dependencies are still a DAG**. The loop exists only inside this node, as part of the runtime flow.
+A new node (`src/silo_rag/agent.py`) that **only calls the public functions** of nodes C and D. **G depends on C and D** (C and D exist first, and G uses their functions). C and D, in turn, know nothing about G (they don't depend on it), and they still don't depend on each other. So the dependencies contain no cycle and are **still a DAG**. The loop exists only inside G, as part of the runtime flow.
 
 ```mermaid
 %%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
