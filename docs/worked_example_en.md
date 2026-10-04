@@ -11,7 +11,7 @@ search; vector search = semantic search).
 - The data is synthetic (60 dummy in-house project reports).
 - Query writing, reranking, and answer generation use `qwen2.5-7b-instruct`; embeddings use
   `text-embedding-nomic-embed-text-v1.5` (both in LM Studio).
-- **Note**: the two questions followed here (QA-005 and QA-001) belong to the 15-question evaluation, which I was looking at when I designed the query rewriting. The claim that "the rewrite helps" (including the stage-by-stage numbers) comes from those 15 questions; re-measuring plain mode on 45 questions could not confirm an effect of the rewrite (see the [README](../README_en.md#evaluation)).
+- **Note**: the two questions followed here (QA-005 and QA-001) belong to the 15-question evaluation, which I was looking at when I designed the search-query writing. The claim that "writing the search query helps" (including the stage-by-stage numbers) comes from those 15 questions; re-measuring plain mode on 45 questions could not confirm an effect of query writing (see the [README](../README_en.md#evaluation)).
 - The values were taken in October 2026 with throwaway scripts (not included in the repository). They step through the
   inside of `search()` one stage at a time, and the script checked that the result matched the real `search()`.
   **Steps that involve an LLM vary a little from run to run, even at temperature 0** (the query written for the same
@@ -116,7 +116,7 @@ both rise.
 ### 5. Reranking (LLM)
 
 The LLM reorders the combined top 20 by relevance to the question and picks the top 5. (The reranking LLM receives the
-**rewritten query**; the answer-generating LLM receives the original question.)
+**written query**; the answer-generating LLM receives the original question.)
 
 1. RPT-018::プロジェクト目的 2. RPT-018::与件 3. RPT-015::対象領域・テーマ 4. RPT-035::プロジェクト目的
 5. RPT-016::対象領域・テーマ
@@ -158,7 +158,7 @@ was kept both times.
 
 ### 2–4. The searches, and combining their scores
 
-In keyword search (BM25), **the gold report RPT-041 moved from third place to first once the question was rewritten** (question as is:
+In keyword search (BM25), **the gold report RPT-041 moved from third place to first once the search query was written** (question as is:
 3rd; 7B query: 1st; 32B query: 1st).
 
 | Rank | Keyword search (score) | Semantic search (score) | Combined (score = 0.5 × keyword part + 0.5 × semantic part) |
@@ -188,11 +188,11 @@ The 7B model's reranking dropped the gold chunk, which was second among the cand
 > … (rest omitted)
 
 For this question, **retrieval (collecting candidates) succeeded and reranking failed**. It is an example where looking
-only at the query rewrite does not reveal the cause.
+only at the query writing does not reveal the cause.
 
-## At which step does the rewrite help? (7B, 15 questions)
+## At which step does writing the search query help? (7B, 15 questions)
 
-Rewriting the question into a search query raised the 7B model's overall hit rate from 0.60 to 0.93. To see where that
+Writing a search query from the question raised the 7B model's overall hit rate from 0.60 to 0.93. To see where that
 comes from, I counted per step over all 15 questions. Numbers are "questions (of 15) where the gold report was included".
 
 **The retrieval steps (before reranking; no LLM involved)**
@@ -204,27 +204,27 @@ comes from, I counted per step over all 15 questions. Numbers are "questions (of
 | Right after combining the scores, top 5 | 10 | 12 | 11 |
 | Combined top 20 (the reranking candidates) | 15 | 15 | 15 |
 
-- **Keyword search (BM25) improved a lot with the rewrite** (11 → 15). But a rewrite does more than drop extra words: it also changes the
+- **Keyword search (BM25) improved a lot with query writing** (11 → 15). But query writing does more than drop extra words: it also changes the
   choice of words and the spacing (the 7B query for QA-001, for instance, drops "既存"). Whether "removing the extra
   words" is the reason is unconfirmed — I did not run an experiment that isolates it.
 - **Semantic search (vector search) was unchanged in total** (5 → 5) and is weak to begin with (5–7 questions). Per question, though, two
   questions gained a hit and two lost one, so they merely swapped places. Vector rankings and scores are also used in
   combining the scores, so they can affect the combined result even when the top-5 hit count does not change.
-- **The 20 reranking candidates already contained the gold report for all 15 questions, even before rewriting.** So
+- **The 20 reranking candidates already contained the gold report for all 15 questions, even before the query was written.** So
   misses do not happen in collecting candidates; they happen in choosing the top 5 from them.
 
 **The final top 5 (after reranking), swapping the query used to collect candidates and the query used to rerank**
 
-| | Rerank: question as is | Rerank: rewritten |
+| | Rerank: question as is | Rerank: written query |
 | --- | --- | --- |
 | **Candidates: question as is** (plain mode) | 9 | 12 |
-| **Candidates: rewritten** | **15** | 14 (the agent's default) |
+| **Candidates: written query** | **15** | 14 (the agent's default) |
 
-- The rewritten query is handed to BM25 and vector search at the same time, so this result cannot be called "BM25's effect
+- The written query is handed to BM25 and vector search at the same time, so this result cannot be called "BM25's effect
   alone".
-- Collecting candidates with the rewritten query helps a lot (9 → 15). Using the rewritten query only for reranking also
-  helps (9 → 12). Rewriting both is not additive (14).
-- The best combination was "collect candidates with the rewritten query, rerank with the original question" (15). With it,
+- Collecting candidates with the written query helps a lot (9 → 15). Using the written query only for reranking also
+  helps (9 → 12). Using the written query for both is not additive (14).
+- The best combination was "collect candidates with the written query, rerank with the original question" (15). With it,
   Example 2 (QA-001) keeps the gold report in the top 5. Perhaps the original question conveys the asker's intent (wanting
   other departments' cases, for instance) to the reranking LLM, but I haven't checked. **It is a one-question difference,
   so I did not adopt this combination.**
@@ -234,5 +234,5 @@ comes from, I counted per step over all 15 questions. Numbers are "questions (of
 - **7B only.** (For 32B, only the BM25 and vector-search steps were measured; the reranking LLM was not run.)
 - **15 questions, one run each.** LLM output varies a little from run to run; a one-question difference can't be called
   real.
-- The "why the rewrite helps" statements go no further than what the per-step numbers show. For example, "a short query
+- The "why query writing helps" statements go no further than what the per-step numbers show. For example, "a short query
   is easier for the LLM to judge during reranking" is still unconfirmed.
