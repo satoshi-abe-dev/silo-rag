@@ -120,7 +120,7 @@ streamlit run src/silo_rag/app.py
 
 ## Architecture
 
-The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times.
+The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
 
 ```mermaid
 graph TB
@@ -128,22 +128,28 @@ graph TB
         direction LR
         A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
     end
-    subgraph ask["② Every question"]
+    subgraph plain["② Every question: plain mode (default)"]
         direction LR
-        F["F app<br/>UI"] --> C["C retrieval<br/>search"] --> D["D generation<br/>answer"]
+        F1["F app<br/>UI"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>answer"]
+    end
+    subgraph agent["② Every question: agent mode (optional)"]
+        direction LR
+        F2["F app<br/>UI"] --> G["G agent<br/>write query → search with C → grade<br/>→ search again if needed"] --> D2["D generation<br/>answer"]
     end
     subgraph ev["③ Evaluation (separate task)"]
         direction LR
         E["E eval<br/>evaluate"] --> CD["calls C and D<br/>to measure accuracy"]
     end
-    prep ~~~ ask
-    ask ~~~ ev
+    prep ~~~ plain
+    plain ~~~ agent
+    agent ~~~ ev
 ```
 
 - **① Preparation**: A makes the synthetic reports, and B loads them into the search data (ChromaDB)
-- **② Every question**: when a user asks in the UI (F), F calls C (search) and hands the result to D (answer generation)
+- **② Every question** (the answer mode is switched in the sidebar)
+  - **Plain mode** (default): F calls C (search) and hands the result to D (answer generation)
+  - **Agent mode** (optional): instead of calling C and D directly, F calls G. G writes the query, searches with C, grades, and searches again if needed, then D writes the answer. With the default settings it searches once, so grading and re-search do not run
 - **③ Evaluation**: E calls C and D to measure retrieval accuracy and answer quality. It is a separate task from answering questions
-- With the **agent mode** (optional), in ② F calls G instead of calling C and D directly. G calls C and D while writing queries, grading, and searching again
 
 The optional nodes G and H, in detail:
 
