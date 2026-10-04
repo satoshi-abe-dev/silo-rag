@@ -237,16 +237,16 @@ graph TD
     S((START)) -->|raw| R["retrieve<br/>search<br/>(C's search)"]
     S -->|rewrite| P["plan<br/>write a search query<br/>(C's plan_query)"]
     P --> R
-    R --> J["grade<br/>is the evidence<br/>sufficient?<br/>(G itself)"]
+    R --> J["grade<br/>is the evidence<br/>sufficient?"]
     J -->|sufficient, or cap reached| SEL["select<br/>rerank all collected<br/>against the original<br/>question<br/>(C's rerank)<br/>(only if searched<br/>more than once)"]
-    J -->|insufficient, under the cap| W["rewrite<br/>write a query from<br/>a different angle<br/>(G itself)"]
+    J -->|insufficient, under the cap| W["rewrite<br/>write a query from<br/>a different angle"]
     W -->|new query| R
     W -->|rewrite failed| SEL
     SEL --> G["generate<br/>write the answer<br/>(D's answer_question)"]
     G --> X((END))
 ```
 
-In the diagram, "(C's ...)" and "(D's ...)" are steps that call a function of that node, and "(G itself)" is a step that lives only in G. **G is not inside C or D; it is a separate node that calls functions of C and D.**
+In the diagram, "(C's ...)" and "(D's ...)" are steps that call a function of that node. The steps without a mark (grading and writing a query from a different angle) live only in G. **G is not inside C or D; it is a separate node that calls functions of C and D.**
 
 - The LLM decides "is the evidence sufficient?" and "what query next"; the code decides "how many times at most" via `[agent] max_attempts` (1 by default, i.e., no re-search)
 - The first query is chosen by `[agent] first_query` (`raw` = the question as is; `rewrite` = a query the LLM writes from the question; `rewrite` by default)
