@@ -1,25 +1,15 @@
-"""Ingestion パイプライン（DAGノードB）。
+"""Node B: ingestion into ChromaDB.
 
-`data/synth_reports/*`（datagenノードが生成したダミーのプロジェクト振り返りレポート。
-Markdown/Word/Excel/PowerPoint/PDFのいずれか）を読み込み、セクション単位でチャンキングし、
-ローカル埋め込みモデルでベクトル化してChromaDBに格納する。
+Reads the reports in `data/synth_reports/` (Markdown/Word/Excel/PowerPoint/PDF), chunks them by
+section, embeds them with a local model, and stores them in ChromaDB.
 
-メタデータ（部署・プロジェクト種別・テーマ・採用手法・日付等）は、datagenが各ファイルの先頭に書き出す
-ヘッダーブロック（Markdownなら`---`フロントマター、Wordなら先頭の表、Excelなら先頭の行、
-PowerPointなら1枚目のスライド、PDFなら先頭のテキスト）から直接読み取る。自由記述文からの
-あいまいな抽出は行わない（レポート形式を自分たちで決められるため、構造化ヘッダーの方が
-確実で、実務の社内文書でもよくあるパターンでもある）。
-
-チャンキングは `## 見出し` 単位（セクション境界を尊重し、単純な文字数分割はしない）。
-ファイル形式によって、その構造をどこまで正確に読み取れるかには差がある（Word/PowerPointは
-見出しスタイルやスライド構造から確実に判定できるが、PDFは本質的に構造を持たないため
-テキストパターン頼みの抽出になる。実務のPDF取り込みでよくある制約をそのまま反映している）。
-
-各レポートには「成果サマリー」セクションに1枚だけ成果画像（グラフ）が
-埋め込まれている想定。ファイル形式ごとの方法で画像を取り出し、LM StudioのVLM
-（config.ai.vlm_model）でキャプション化して、対応するチャンクの検索対象テキストに
-追記する（画像の内容も検索できるようにするため）。VLM未ロード等で失敗しても、
-その画像のキャプションが無いだけでテキスト取り込み自体は続行する。
+- Metadata comes from the structured header datagen writes (Markdown front matter, the first Word
+  table, the first Excel rows, the first slide, or the leading PDF text), never from free text.
+- Chunks follow `## heading` sections, not character counts. Word/PowerPoint structure is reliable;
+  PDF has none, so it relies on text patterns, as real-world PDF ingestion does.
+- The one result image in each report's result section is captioned by the VLM
+  (config.ai.vlm_model) and appended to that chunk so it is searchable. A captioning failure only
+  drops that caption; ingestion continues.
 """
 
 from __future__ import annotations
@@ -38,8 +28,8 @@ _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.DOTALL)
 _SECTION_RE = re.compile(r"^## +(.+?)\s*$", re.MULTILINE)
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
-# 画像が必ず添付されるセクション。datagen.RESULT_IMAGE_SECTIONと同じ値を独自に持つ
-# （datagenへ依存する逆向きの結合を避けるため。既存の見出し正規表現と同じ方針）。
+# Same value as datagen.RESULT_IMAGE_SECTION, duplicated to avoid depending on datagen
+# (against the DAG direction), like the heading regex above.
 RESULT_IMAGE_SECTION = "成果サマリー"
 
 _IMAGE_CAPTION_PROMPT = (
@@ -57,7 +47,7 @@ class Chunk:
 
 
 def parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
-    """先頭の `---` フロントマターを辞書として取り出し、残りの本文と一緒に返す。"""
+    """Parse the leading `---` front matter; return (metadata, remaining body)."""
     m = _FRONTMATTER_RE.match(raw)
     if not m:
         raise ValueError(
@@ -74,7 +64,7 @@ def parse_frontmatter(raw: str) -> tuple[dict[str, str], str]:
 
 
 def split_into_sections(body: str) -> list[tuple[str, str]]:
-    """`## 見出し` ごとにMarkdown本文を分割する。見出し前のタイトル行は無視する。"""
+    """Split a Markdown body at each `## heading`, ignoring the title before the first one."""
     matches = list(_SECTION_RE.finditer(body))
     sections: list[tuple[str, str]] = []
     for i, m in enumerate(matches):
@@ -92,8 +82,7 @@ def _extract_markdown(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]
     meta, body = parse_frontmatter(raw)
     sections = split_into_sections(body)
 
-    # 画像は `![alt](ファイル名)` としてセクション本文中に埋め込まれている
-    # （datagen._write_markdown参照）。見つけたら本文から取り除き、隣のPNGファイルを読む。
+    # datagen._write_markdown embeds the image as `![alt](file)`: strip the link, read the sibling PNG.
     image: bytes | None = None
     cleaned: list[tuple[str, str]] = []
     for heading, text in sections:
@@ -108,7 +97,7 @@ def _extract_markdown(path: Path) -> tuple[dict[str, str], list[tuple[str, str]]
 
 
 def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], bytes | None]:
-    """Wordファイルからメタデータ（先頭の表）とセクション（見出しスタイル単位）を取り出す。"""
+    """Read metadata from the first table and sections from heading styles in a Word file."""
     from docx import Document
 
     doc = Document(str(path))
@@ -123,7 +112,7 @@ def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
     current_lines: list[str] = []
     for para in doc.paragraphs:
         style_name = para.style.name if para.style is not None else ""
-        # "Heading 1" はタイトル行なので対象外。"Heading 2" 以降がセクション見出し。
+        # "Heading 1" is the title; "Heading 2" and below are sections.
         if style_name.startswith("Heading") and style_name != "Heading 1":
             if current_heading is not None:
                 sections.append((current_heading, "\n".join(current_lines).strip()))
@@ -134,10 +123,8 @@ def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
     if current_heading is not None:
         sections.append((current_heading, "\n".join(current_lines).strip()))
 
-    # レポート1件につき画像は最大1枚（datagen._write_docx参照）なので、
-    # 最初に見つかった画像リレーションシップをそのまま結果画像として扱う。
-    # InlineShapeには`.image`属性が無い（python-docxの実際のAPIと異なっていた）ため、
-    # ドキュメントのリレーションシップから直接画像パートを辿る。
+    # A report has at most one image, so take the first image relationship. InlineShape has no
+    # `.image` attribute in python-docx, so go through the document relationships instead.
     image: bytes | None = None
     try:
         for rel in doc.part.rels.values():
@@ -150,15 +137,13 @@ def _extract_docx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
 
 
 def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], bytes | None]:
-    """Excelファイルからメタデータ（先頭の行群）とセクション（見出し, 内容の行）を取り出す。
+    """Read metadata and (heading, text) section rows from an Excel file.
 
-    行数を決め打ちにせず、A列が空になる行までをメタデータとみなし、
-    その次の1行を区切りとしてスキップしてからセクション行を読む。
+    Metadata runs until the first empty cell in column A; the next row is a separator.
     """
     from openpyxl import load_workbook
 
-    # 画像（ws._images）はread_onlyモードでは読み込まれないため、通常モードで開く
-    # （このプロジェクトのデータ規模ではメモリ効率を気にする必要はない）。
+    # read_only mode doesn't load ws._images; memory isn't a concern at this data size.
     wb = load_workbook(str(path), data_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(values_only=True))
@@ -170,7 +155,7 @@ def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
         value = rows[idx][1] if len(rows[idx]) > 1 else None
         meta[key] = "" if value is None else str(value)
         idx += 1
-    idx += 1  # 区切りの空行をスキップ
+    idx += 1  # skip the blank separator row
 
     sections: list[tuple[str, str]] = []
     for row in rows[idx:]:
@@ -180,9 +165,8 @@ def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
         value = row[1] if len(row) > 1 else None
         sections.append((heading, "" if value is None else str(value)))
 
-    # `.ref`はPIL Imageだと想定していたが、実際にはBytesIO（`.save()`を持たない）で
-    # 返ってくることが確認された。`_data()`はopenpyxl自身が書き出し時に使う、生バイト列を
-    # 返すメソッドなので、`.ref`の内部表現に依存せずこちらを使う。
+    # `.ref` turned out to be a BytesIO, not a PIL Image, so use `_data()` (the raw bytes openpyxl
+    # itself writes) instead of relying on `.ref`'s internal type.
     image: bytes | None = None
     embedded_images = getattr(ws, "_images", [])
     if embedded_images:
@@ -194,7 +178,7 @@ def _extract_xlsx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
 
 
 def _extract_pptx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], bytes | None]:
-    """PowerPointファイルから、1枚目=メタデータ、2枚目以降=セクションとして取り出す。"""
+    """Read a PowerPoint file: slide 1 is metadata, each later slide is a section."""
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
 
@@ -205,7 +189,7 @@ def _extract_pptx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
 
     def _body_text(slide) -> str:
         for shape in slide.placeholders:
-            # placeholder_format.idx == 0 はタイトル。それ以外を本文とみなす。
+            # idx 0 is the title placeholder; anything else is body.
             if shape.placeholder_format.idx != 0 and shape.has_text_frame:
                 return shape.text_frame.text
         return ""
@@ -234,19 +218,13 @@ def _extract_pptx(path: Path) -> tuple[dict[str, str], list[tuple[str, str]], by
 
 
 def _parse_pdf_text(full_text: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """PDFから抽出済みのプレーンテキストを、`key: value` 行をメタデータ、`## 見出し` 行を
-    セクション境界としてパースする（pypdfに依存しない純粋関数）。
+    """Parse extracted PDF text: `key: value` lines are metadata, `## heading` lines start sections.
 
-    datagen._pdf_lines() が組み立てる行の並びを前提にしている。PDFは本質的に構造を
-    持たないため、他形式と違いテキストパターン頼みの抽出になる（実務のPDF取り込みでも
-    よくある制約）。pypdfからのテキスト抽出処理と分離してあるので、pypdf/reportlabが
-    無い環境でも datagen._pdf_lines() の出力を直接渡して往復ロジックをテストできる。
+    Assumes the layout from datagen._pdf_lines(). A pure function (no pypdf), so the round trip
+    can be tested without pypdf or reportlab.
 
-    メタデータとセクション本文の境目は「最初の`## `見出し行」で判定する（空行の有無は
-    見ない）。当初は「メタデータ行の直後にある空行」を区切りにしていたが、実際にpypdfで
-    抽出したテキストでは、drawStringを呼ばずにy座標だけ送った空行がテキストとして
-    残らないことがあり、区切りの空行が消えて全セクションが読めなくなる実例が
-    見つかったため（60件中9件のPDFで発生）、空行に依存しない実装に変更した。
+    Metadata ends at the first `## ` line, not at a blank line: pypdf can drop blank lines that were
+    only a y-offset, which once made every section unreadable (9 of 60 PDFs).
     """
     lines = full_text.split("\n")
 
@@ -263,7 +241,7 @@ def _parse_pdf_text(full_text: str) -> tuple[dict[str, str], list[tuple[str, str
             current_heading = stripped[3:].strip()
             current_lines = []
         elif current_heading is None:
-            # 最初の見出し行にまだ到達していない = メタデータ部分。
+            # Before the first heading: metadata.
             if ":" in stripped:
                 key, _, value = stripped.partition(":")
                 meta[key.strip()] = value.strip()
@@ -308,11 +286,9 @@ _EXTRACTORS = {
 
 
 def _caption_image(client: LLMClient, image: bytes) -> str | None:
-    """画像をVLMでキャプション化する。
+    """Caption an image with the VLM, or return None on failure (e.g. VLM not loaded).
 
-    VLM未ロード等で失敗しても、テキスト取り込み全体は止めない
-    （retrieval.pyのLLMリランク失敗時のフォールバックと同じ考え方。この画像1枚の
-    キャプションが無いままチャンクを作るだけで、レポート全体の取り込みは続行する）。
+    Like retrieval.py's rerank fallback: a failure only drops this caption, ingestion continues.
     """
     try:
         return client.describe_image(image, _IMAGE_CAPTION_PROMPT)
@@ -326,11 +302,10 @@ def _find_report_paths(reports_dir: Path) -> list[Path]:
 
 
 def build_chunks(report_path: Path, client: LLMClient | None = None) -> list[Chunk]:
-    """1ファイル分のチャンクを作る。
+    """Build the chunks for one file.
 
-    client を渡すと、埋め込み画像があればVLMでキャプション化し、結果セクションの
-    チャンク本文に追記する（画像の内容も検索対象にするため）。client=Noneなら
-    キャプション化をスキップする（テスト等、LLM接続なしでの利用を想定）。
+    With a client, an embedded image is captioned and appended to the result-section chunk so it is
+    searchable. client=None skips captioning (e.g. tests without an LLM).
     """
     extractor = _EXTRACTORS.get(report_path.suffix.lower())
     if extractor is None:
@@ -363,7 +338,7 @@ def load_all_chunks(reports_dir: Path = SYNTH_REPORTS_DIR, client: LLMClient | N
 
 
 def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR) -> int:
-    """レポートを読み込み、埋め込みを計算してChromaDBに格納する。格納したチャンク数を返す。"""
+    """Embed the reports into ChromaDB and return the number of chunks stored."""
     import chromadb
 
     report_paths = _find_report_paths(reports_dir)
@@ -381,24 +356,22 @@ def ingest(reports_dir: Path = SYNTH_REPORTS_DIR, chroma_dir: Path = CHROMA_DIR)
                 f"LM Studio ({config.ai.base_url}) に接続できません。起動してモデルをロードしてください。"
             )
 
-        # チャンク構築（埋め込み画像があればここでVLMキャプション化も行う）は、
-        # 埋め込み・格納に使うのと同じLLMClientインスタンスで行う。
+        # Building chunks also captions images, using the same client as embedding.
         chunks: list[Chunk] = []
         for path in report_paths:
             chunks.extend(build_chunks(path, llm_client))
         if not chunks:
             raise SystemExit(f"{reports_dir} のレポートからチャンクを構築できませんでした。")
 
-        # 新しいコレクションを一時名で組み立て、全チャンクの埋め込みが成功してから
-        # 旧コレクションと入れ替える。途中で失敗しても既存の検索用インデックスを壊さない。
-        # list_collections()の返り値の形（Collectionオブジェクト/名前の文字列）は
-        # chromadbのバージョンによって異なるため、存在チェックはせず削除を試みて無視する。
+        # Build into a temporary collection and swap only after every embedding succeeds, so a
+        # failure never breaks the existing index. list_collections() returns different types across
+        # chromadb versions, so just try deleting instead of checking existence.
         building_name = f"{COLLECTION_NAME}__building"
         _delete_collection_if_exists(client, building_name)
         building = client.create_collection(building_name)
 
         try:
-            # 大量チャンクでも1リクエストに収まるよう、適度なバッチサイズで埋め込みを取得する。
+            # Batch so each embedding request stays a reasonable size.
             batch_size = 32
             for i in range(0, len(chunks), batch_size):
                 batch = chunks[i : i + batch_size]

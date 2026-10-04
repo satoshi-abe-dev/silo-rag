@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# UI起動前の下準備（合成データ生成 → 取り込み → 評価）を1コマンドでまとめて実行する。
-# 個別ステップだけやり直したい場合は、README記載の各コマンドを直接叩けばよい。
+# Prepare everything the UI needs in one command: generate data -> ingest -> evaluate.
+# To redo a single step, run its command from the README directly.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

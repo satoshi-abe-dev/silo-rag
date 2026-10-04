@@ -1,16 +1,10 @@
-"""引用付き回答生成（DAGノードD）。
+"""Node D: answer generation with citations.
 
-質問と、すでに検索済みのコンテキストチャンク（`retrieval.py` が返すもの）を受け取り、
-ローカルLLM（LM Studio等、OpenAI互換API）でチャンクの内容だけに基づいた回答を生成する。
+Answers from already-retrieved chunks only, via a local OpenAI-compatible LLM. Does no retrieval
+and doesn't depend on retrieval.py, so both can be built and tested independently.
 
-このモジュール自身は検索を一切行わない（retrieval.pyへは依存しない）。検索と生成を
-分離することで、retrieval.pyとgeneration.pyを独立して実装・テストできるようにしている。
-
-本プロジェクトの価値提案の核は「部署間で情報共有が統一されていないなかで、他部署の
-過去事例を横断的に見つけられること」。そのため回答生成では、各引用元がどの部署の事例かを
-本文中に明示させ、読み手が「自部署の事例か・他部署の事例か」を一目で区別できるようにする。
-
-社名は実在・架空を問わず一切出さない。
+The core value is surfacing other departments' past cases, so answers name each source's department
+to make own-department vs. other-department cases obvious. No company names, real or fictional.
 """
 
 from __future__ import annotations
@@ -40,11 +34,7 @@ class Answer:
 
 
 def _build_context_block(index: int, chunk: Chunk) -> str:
-    """1チャンク分をLLMへの提示用テキストに整形する。
-
-    出典を混同されないよう、report_id/部署/テーマ/プロジェクト種別/セクションをヘッダーとして
-    チャンク本文の前に明示し、チャンクごとに区切り線で区切る。
-    """
+    """Format one chunk for the prompt, with a metadata header so the LLM doesn't mix up sources."""
     meta = chunk.metadata
     header = (
         f"[出典{index}] report_id={meta.get('report_id', '不明')} / "
@@ -57,7 +47,7 @@ def _build_context_block(index: int, chunk: Chunk) -> str:
 
 
 def _build_history_block(history: list[tuple[str, str]] | None) -> str:
-    """会話履歴を、プロンプトに埋め込む1ブロックのテキストに整形する。履歴が無ければ空文字。"""
+    """Format recent history as a prompt block; empty string if there is none."""
     if not history:
         return ""
     lines = ["# これまでの会話（指示語の解決にのみ使う。事実の根拠にはしない）"]
@@ -117,16 +107,10 @@ def _build_prompt(
 
 
 def build_citations(chunks: list[Chunk]) -> list[Citation]:
-    """入力チャンクのメタデータから、決定的に引用リストを組み立てる。
+    """Build citations deterministically from chunk metadata, deduplicated by (report_id, section).
 
-    LLMに引用リストを列挙させるのではなく、ここでチャンクのメタデータから直接構築する
-    （LLMの引用表記が不完全でも、citationsフィールドは常に正確であることを保証するため）。
-
-    1つのレポートが複数セクション（＝複数チャンク）から引用されることがあるため、
-    report_idだけで丸めてしまうとUI上で「どのセクションが根拠か」が失われる。
-    一方で同じ(report_id, section)の組が複数回渡された場合（検索結果の重複等）に
-    同じCitationを繰り返し表示するのは冗長。そこで (report_id, section) の組で
-    重複排除しつつ、異なるsectionはそれぞれ別のCitationとして残す。
+    Built from metadata rather than parsed from LLM output, so they stay accurate even when the
+    LLM's inline citations are sloppy. Deduping by report_id alone would lose which section was cited.
     """
     seen: dict[tuple[str, str], Citation] = {}
     for chunk in chunks:
@@ -146,16 +130,12 @@ def answer_question(
     chunks: list[Chunk],
     history: list[tuple[str, str]] | None = None,
 ) -> Answer:
-    """質問と検索済みチャンクから、引用付きの回答を生成する。
+    """Generate a cited answer from retrieved chunks (ordered by relevance).
 
-    chunks は関連度順にすでに検索済みのコンテキスト（retrieval.search()の結果を想定）。
-    このモジュールは検索を行わない。chunksが空の場合はLLMを呼ばず、該当事例なしの
-    回答を返す（コンテキストなしでLLMに回答させるとハルシネーションの原因になるため）。
-
-    history: 直前までの会話（質問, 回答本文）のリスト。指定すると、指示語（「それ」等）の
-    解決に使う（事実の根拠には使わない。プロンプト側の指示で担保している）。
-
-    LLMClient.chatが送出するLLMConnectionErrorはここで捕まえず、呼び出し元に伝播させる。
+    With no chunks, returns a "nothing found" answer without calling the LLM, to avoid hallucination.
+    history: prior (question, answer) pairs, used only to resolve references like "that one",
+        never as factual evidence (enforced by the prompt).
+    LLMConnectionError from LLMClient.chat propagates to the caller.
     """
     if not chunks:
         return Answer(text=_NO_CONTEXT_ANSWER, citations=[])

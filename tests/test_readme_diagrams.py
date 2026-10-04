@@ -1,8 +1,8 @@
-"""READMEとdocsのMermaid図が、GitHub上で文字切れしないための決まりを守っているかを調べるテスト。
+"""Check that Mermaid diagrams in the README and docs don't get clipped on GitHub.
 
-Mermaidは、スペースの無い日本語を途中で折り返せず、1行が約200px（全角13文字ほど）を超えると、
-ノードの端で文字が切れる。このテストは、ノードのラベルを<br/>で分けた各行の表示幅（全角=2、半角=1）が
-上限（全角12文字）を超えていないこと、各図が余白と折り返し幅の設定（init）で始まることを確かめる。
+Mermaid can't wrap unspaced Japanese, so a label line wider than ~200px (about 13 full-width
+chars) is clipped at the node edge. Each <br/>-separated label line must fit 12 full-width chars,
+and every diagram must start with the init directive (padding and wrapping width).
 """
 
 from __future__ import annotations
@@ -15,15 +15,15 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README_FILES = ["README_ja.md", "README_en.md"]
-# README と、図を含む docs の文書（READMEから docs へ図を移しても、検査から外れないように）。
+# Include docs with diagrams too, so moving a diagram out of the README keeps it checked.
 DIAGRAM_FILES = README_FILES + sorted(
     f"docs/{p.name}"
     for p in (REPO_ROOT / "docs").glob("*.md")
     if "```mermaid" in p.read_text(encoding="utf-8")
 )
-MAX_LINE_WIDTH = 24  # 全角12文字ぶん（全角=2、半角=1で数える）
+MAX_LINE_WIDTH = 24  # 12 full-width chars (full-width = 2, half-width = 1)
 
-# ノードのラベル: ID["…"] / ID[…] / ID((…))。subgraphの見出し・辺のラベルは対象外。
+# Node labels: ID["…"] / ID[…] / ID((…)). Subgraph titles and edge labels are excluded.
 _NODE_LABEL_RE = re.compile(r'\["([^"]+)"\]|\[([^\]\["]+)\]|\(\(([^()]+)\)\)')
 
 
@@ -68,7 +68,7 @@ def test_no_node_label_line_is_too_wide(name):
 
 
 def test_the_width_check_catches_the_labels_that_were_clipped_before():
-    # 実際に切れていたラベル（ノードGの流れの図）が、この判定で引っかかること。
+    # Labels that were actually clipped (node G flow diagram) must be flagged.
     assert _display_width("select: 複数回検索したときだけ、集めた候補を元の質問で並べ直す") > MAX_LINE_WIDTH
     assert _display_width("rewrite: 別の切り口でクエリを作る") > MAX_LINE_WIDTH
     assert _display_width("（Dの answer_question）") <= MAX_LINE_WIDTH

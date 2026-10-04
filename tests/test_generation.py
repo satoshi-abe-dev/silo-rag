@@ -1,5 +1,4 @@
-"""generation（DAGノードD）の純粋ロジックのテスト。LLMは使わない
-（空チャンク時にLLMを一切呼ばないことも、フェイクのclientで検証する）。"""
+"""Tests for generation (DAG node D) pure logic; LLM calls are faked."""
 
 from __future__ import annotations
 
@@ -25,8 +24,8 @@ def _chunk(report_id: str, section: str, dept: str, text: str = "本文") -> Chu
 def test_build_citations_dedup_by_report_and_section():
     chunks = [
         _chunk("RPT-001", "プロジェクト目的", "マーケティング部"),
-        _chunk("RPT-001", "プロジェクト目的", "マーケティング部"),  # 完全な重複 -> 1件に畳まれる
-        _chunk("RPT-001", "成果サマリー", "マーケティング部"),  # 同一レポートの別セクション -> 別件
+        _chunk("RPT-001", "プロジェクト目的", "マーケティング部"),  # exact duplicate -> collapsed
+        _chunk("RPT-001", "成果サマリー", "マーケティング部"),  # same report, other section -> kept
         _chunk("RPT-002", "プロジェクト目的", "営業推進部"),
     ]
     citations = build_citations(chunks)
@@ -53,8 +52,7 @@ def test_build_context_block_includes_metadata_header():
 
 
 class _NeverCallLLMClient:
-    """chunksが空のときにLLMへ問い合わせないことを確認するためのフェイク。
-    .chatが呼ばれたらテストを失敗させる。"""
+    """Fails the test if chat is called (empty chunks must not reach the LLM)."""
 
     def chat(self, *args, **kwargs):
         raise AssertionError("chunksが空なのにLLMが呼び出された")
@@ -63,7 +61,7 @@ class _NeverCallLLMClient:
 def test_answer_question_with_no_chunks_skips_llm_call():
     answer = answer_question(_NeverCallLLMClient(), "質問", [])
     assert answer.citations == []
-    assert answer.text  # 何らかの「見つかりませんでした」系メッセージが返る
+    assert answer.text  # some "nothing found" message
 
 
 def test_build_history_block_empty_for_no_history():
@@ -85,16 +83,16 @@ def test_build_history_block_truncates_long_answers():
 
 
 def test_build_history_block_caps_to_last_n_turns():
-    history = [(f"質問{i}", f"回答{i}") for i in range(1, 6)]  # 5往復
+    history = [(f"質問{i}", f"回答{i}") for i in range(1, 6)]  # 5 turns
     block = _build_history_block(history)
-    assert "質問1" not in block  # 直近3往復だけが残る
+    assert "質問1" not in block  # only the last 3 turns remain
     assert "質問2" not in block
     assert "質問3" in block
     assert "質問5" in block
 
 
 class _RecordingLLMClient:
-    """.chatに渡された(system, user)を記録するだけのフェイク。"""
+    """Records the (system, user) pairs passed to chat."""
 
     def __init__(self, response: str = "回答本文"):
         self.response = response

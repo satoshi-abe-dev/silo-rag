@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
-# baseline と エージェント（判定 strict／lenient）を同じ評価セットで回し、比較表を表示する。
+# Run baseline and the agent (strict / lenient grading) on the same eval set and print a comparison.
 #
-# 使い方（仮想環境を有効化した状態で）:
-#   bash scripts/compare_pipelines.sh                       # config.tomlのllm_modelで実行
-#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct   # 回答モデルを指定して実行
-#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct --rewrite-first   # 1回目からクエリを作る版（3種）も追加
+# Usage (with the venv active):
+#   bash scripts/compare_pipelines.sh                       # llm_model from config.toml
+#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct   # pick the answer model
+#   bash scripts/compare_pipelines.sh qwen2.5-7b-instruct --rewrite-first   # also run 3 rewrite-first variants
 #
-# 実行ごとに、エージェントの設定（first_query・max_attempts）は明示している。config.tomlや環境変数の
-# 既定（クエリを作って1回検索する）に左右されず、毎回同じ条件で比べるため。
+# Agent settings (first_query, max_attempts) are passed explicitly so config.toml or env defaults
+# can't change the conditions between runs.
 #
-# 結果は data/eval/compare/<モデル名>/ に書き出す。別モデルの結果と並べるには:
+# Results go to data/eval/compare/<model>/. To compare across models:
 #   python -m silo_rag.eval --compare data/eval/compare/*/*.json
 #
-# judge（LLM-as-judge）の採点モデルは、回答モデルと同じにしている（LM Studioで2つの大きな
-# モデルを1問ごとに切り替えると、ロードし直しで極端に遅くなるため）。そのため、judgeの値は
-# 同じモデルの実行どうしでしか比べられない（比較表にも注意が出る）。検索精度（hit_rate等）は
-# 採点モデルに依存しないので、モデルをまたいで比べられる。
+# The judge uses the answer model, since swapping two large models per question in LM Studio is very
+# slow. So judge scores only compare within one model; retrieval metrics compare across models.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 

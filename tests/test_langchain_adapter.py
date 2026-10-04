@@ -1,7 +1,6 @@
-"""langchain_adapter（DAGノードH、LangChain連携）のテスト。ChromaDB・実LLMは使わない。
+"""Tests for langchain_adapter (DAG node H): retriever, tool output, search counting and caps.
 
-search()は差し替え、エージェントのLLMは「決めた順にメッセージを返す」フェイクにして、
-Retrieverの変換・ツール出力・エージェントの検索回数の数え方・上限での停止を検証する。
+No ChromaDB or real LLM: search() is stubbed and the agent model replays scripted messages.
 """
 
 from __future__ import annotations
@@ -44,8 +43,7 @@ def _call_tool(query: str, call_id: str) -> AIMessage:
 
 
 class _FakeToolModel(GenericFakeChatModel):
-    """決めた順にメッセージを返すフェイク。bind_tools（ツールをモデルに渡す処理）は何もしない。
-    モデルに渡されたメッセージ列は、seenに記録する。"""
+    """Replays scripted messages; bind_tools is a no-op and inputs are recorded in `seen`."""
 
     seen: list = Field(default_factory=list)
 
@@ -97,7 +95,7 @@ def test_retriever_converts_chunks_to_documents_and_records(fake_search):
     assert docs[1].metadata["dept"] == "商品開発部"
     assert docs[0].metadata["chunk_id"] == "c1"
     assert docs[0].metadata["score"] == 0.9
-    # ツールに渡るクエリはLLMが作ったものなので、検索側での書き直しは必ず切る（設定でオンにされていても）。
+    # The LLM already wrote the query, so search-side rewriting is always off, even if configured on.
     assert calls == [
         {
             "query": "検索クエリ",
@@ -136,8 +134,7 @@ def test_tool_output_includes_citation_header(fake_search):
 
 
 def test_retriever_runs_concurrent_searches_one_at_a_time(monkeypatch):
-    # 並列ツール呼び出しで同時に呼ばれても、search()が重ならないこと
-    # （ChromaDB・LM Studioが同時実行に耐えない）。
+    # Parallel tool calls must not overlap search(): ChromaDB and LM Studio can't handle concurrency.
     import threading
     import time
 
@@ -176,7 +173,7 @@ def test_retriever_stops_searching_after_max_calls(fake_search):
 
     outputs = [retriever.invoke(f"q{i}") for i in range(5)]
 
-    assert len(calls) == 2  # 3回目以降は検索しない
+    assert len(calls) == 2  # no search from the third call on
     assert [len(o) for o in outputs] == [1, 1, 0, 0, 0]
     assert retriever.search_calls == 2
     assert retriever.search_requests == 5
@@ -195,7 +192,7 @@ def test_agent_searches_once_then_answers(fake_search):
 
     assert result.answer.text == "RPT-001が参考になります"
     assert result.searches == 1
-    assert result.llm_calls == 2  # ツール呼び出しの判断1回＋最終回答1回
+    assert result.llm_calls == 2  # one tool-call decision + the final answer
     assert [sc.chunk.chunk_id for sc in result.scored_chunks] == ["c1", "c2"]
     assert {c.report_id for c in result.answer.citations} == {"RPT-001", "RPT-002"}
     assert [c["query"] for c in calls] == ["失敗事例"]
@@ -203,7 +200,7 @@ def test_agent_searches_once_then_answers(fake_search):
 
 
 def test_agent_answering_without_search_reports_zero_searches(fake_search):
-    # ツール呼び出しをしないモデル（小さなモデルで起きうる）。検索0回で、根拠なしの回答になる。
+    # Small models may skip the tool entirely: zero searches, an answer without evidence.
     model = _model(AIMessage(content="検索せずに答えました"))
 
     result = run_langchain_agent(object(), "質問", top_k=5, max_searches=3, model=model)
@@ -215,8 +212,8 @@ def test_agent_answering_without_search_reports_zero_searches(fake_search):
 
 
 def test_agent_caps_parallel_tool_calls_within_one_response(fake_search):
-    # 1回の応答で検索ツールを何度も同時に呼ぶ（実データで約50回）。recursion_limitでは止まらないので、
-    # Retriever側の上限で検索回数が制限されること。
+    # One response can request many parallel searches (~50 on real data); recursion_limit doesn't
+    # catch that, so the retriever's own cap must.
     calls, results = fake_search
     results.extend([[_sc(f"c{i}")] for i in range(10)])
     many = AIMessage(
@@ -235,8 +232,8 @@ def test_agent_caps_parallel_tool_calls_within_one_response(fake_search):
 
 @pytest.mark.parametrize("searches", [1, 2, 3])
 def test_agent_returns_valid_answer_after_exactly_max_searches(fake_search, searches):
-    # 検索が上限ちょうどまで続いても、有効な回答を捨てないこと（codexレビューで指摘された境界。
-    # ステップ数の上限がぎりぎりだと、回答を出したあとにGraphRecursionErrorになっていた）。
+    # Regression (codex review): with a tight step limit, using exactly max_searches raised
+    # GraphRecursionError after the answer and discarded it.
     _, results = fake_search
     results.extend([[_sc(f"c{i}")] for i in range(searches)])
     model = _model(*[_call_tool(f"q{i}", f"t{i}") for i in range(searches)], AIMessage(content="有効な回答"))
@@ -249,8 +246,8 @@ def test_agent_returns_valid_answer_after_exactly_max_searches(fake_search, sear
 
 
 def test_agent_counts_actual_model_calls_when_it_loops_on_an_unknown_tool(fake_search):
-    # 無効なツール呼び出しを繰り返すモデル。検索は0回のまま、モデルの呼び出し回数は実際の数が返ること
-    # （「検索回数＋1」の推測では、実際より少なく報告していた）。
+    # Regression: llm_calls was estimated as searches + 1, under-reporting a model that keeps
+    # calling an invalid tool. It must be the actual count.
     wrong = (
         AIMessage(content="", tool_calls=[{"name": "wrong_tool", "args": {"query": "q"}, "id": f"t{i}"}])
         for i in count()
@@ -284,7 +281,7 @@ def test_agent_stops_at_max_searches(fake_search):
 
     result = run_langchain_agent(object(), "質問", top_k=5, max_searches=2, model=model)
 
-    assert result.searches == 2  # 3回目の検索は実行されない
+    assert result.searches == 2  # the third search never runs
     assert result.answer.text == _NO_ANSWER
     assert len(result.scored_chunks) == 2
 
@@ -302,12 +299,11 @@ def test_agent_passes_history_as_messages(fake_search):
 
     (seen,) = model.seen
     human_texts = [m.content for m in seen if isinstance(m, HumanMessage)]
-    # 4往復の履歴のうち、直近3往復だけが渡る。
+    # Only the last 3 of 4 turns are passed.
     assert human_texts == ["古い質問2", "古い質問3", "直前の質問", "それについて詳しく"]
 
 
 def test_agent_counts_only_new_messages_not_history(fake_search):
-    # 履歴のAIMessageをllm_callsに数えない。
     model = _model(AIMessage(content="回答"))
 
     result = run_langchain_agent(object(), "質問", history=[("q", "a")], top_k=5, max_searches=3, model=model)
@@ -325,7 +321,7 @@ def test_agent_max_searches_below_one_is_clamped(fake_search):
     assert result.searches == 1
 
 
-# --- 純粋関数 --------------------------------------------------------------------
+# --- Pure functions --------------------------------------------------------------
 
 
 def test_message_text_handles_string_and_block_content():

@@ -1,7 +1,6 @@
-"""agent（DAGノードG、LangGraph）のテスト。ChromaDB・LLMは使わない。
+"""Tests for the LangGraph agent (DAG node G): graph branching and loop termination.
 
-search()とanswer_question()は差し替え、LLMClientは「判定」「書き直し」の応答を
-台本どおりに返すフェイクにして、グラフの分岐とループの止まり方だけを検証する。
+No ChromaDB or LLM: search/answer_question are stubbed and the LLM client is scripted.
 """
 
 from __future__ import annotations
@@ -31,8 +30,7 @@ def _sc(chunk_id: str, score: float = 1.0) -> ScoredChunk:
 
 
 class _ScriptedAgentClient:
-    """判定・書き直しの応答を、それぞれ台本どおりに順番に返すフェイク。
-    台本の要素がLLMConnectionErrorのインスタンスなら、それを送出する。"""
+    """Returns scripted grade/rewrite/plan replies in order; raises scripted exceptions."""
 
     def __init__(
         self,
@@ -70,19 +68,18 @@ class _ScriptedAgentClient:
 
 @pytest.fixture(autouse=True)
 def _first_query_raw_by_default(monkeypatch):
-    """このファイルの多くのテストは「質問そのままで検索する」動きを前提に書かれている。
+    """Pin first_query to "raw" (default is "rewrite"); most tests here assume a raw first search.
 
-    設定の既定値（first_query）は"rewrite"なので、環境変数で"raw"に固定する。クエリを作る動きの
-    テストは、first_query="rewrite"を引数で明示している。既定値そのもののテストはtest_config.py。
+    Rewrite tests pass first_query="rewrite" explicitly; the default itself is tested in test_config.py.
     """
     monkeypatch.setenv("SILORAG_AGENT_FIRST_QUERY", "raw")
 
 
 @pytest.fixture
 def fake_pipeline(monkeypatch):
-    """search()・answer_question()を差し替え、呼び出し内容を記録する。
+    """Stub search/rerank/answer_question and record their calls.
 
-    results: search()が呼ばれるたびに順番に返す検索結果。足りなくなったら空リストを返す。
+    `results` is consumed one per search() call; an empty list is returned once exhausted.
     """
 
     class _Recorder:
@@ -90,7 +87,7 @@ def fake_pipeline(monkeypatch):
             self.results: list[list[ScoredChunk]] = []
             self.search_calls: list[dict] = []
             self.rerank_calls: list[dict] = []
-            # rerank()の並べ替え方。既定は入力の順序のまま返す。
+            # Default rerank keeps the input order.
             self.rerank_order = lambda candidates: list(candidates)
             self.generated_with: list[str] | None = None
 
@@ -122,7 +119,7 @@ def fake_pipeline(monkeypatch):
     return rec
 
 
-# --- グラフの分岐とループ ----------------------------------------------------------
+# --- Graph branching and loop ------------------------------------------------------
 
 
 def test_sufficient_on_first_try_skips_rewrite(fake_pipeline):
@@ -148,7 +145,7 @@ def test_insufficient_retries_with_rewritten_query(fake_pipeline):
     assert [c["query"] for c in fake_pipeline.search_calls] == ["質問", "別の切り口のクエリ"]
     assert result.tried_queries == ["質問", "別の切り口のクエリ"]
     assert result.attempts == 2
-    # 最新の検索結果が優先され、前回の結果は後ろに残る。
+    # Latest results come first; earlier ones are kept after them.
     assert fake_pipeline.generated_with == ["b", "a"]
 
 
@@ -159,9 +156,9 @@ def test_loop_stops_at_max_attempts(fake_pipeline):
     result = run_agent(client, "質問", top_k=5, max_attempts=3)
 
     assert len(fake_pipeline.search_calls) == 3
-    assert client.rewrite_calls == 2  # 上限に達した後は書き直さない
+    assert client.rewrite_calls == 2  # no rewrite once the cap is reached
     assert result.attempts == 3
-    assert result.answer is not None  # 不十分のままでも、手元のチャンクで回答する
+    assert result.answer is not None  # still answers from what it has
 
 
 def test_max_attempts_one_never_rewrites(fake_pipeline):
@@ -217,7 +214,7 @@ def test_rewrite_connection_error_stops_loop(fake_pipeline):
 
 def test_rewrite_repeating_tried_query_stops_loop(fake_pipeline):
     fake_pipeline.results = [[_sc("a")]]
-    # 空白・大小文字の違いだけなら「同じクエリ」とみなす。
+    # Queries differing only in whitespace/case count as the same.
     client = _ScriptedAgentClient(grades=["INSUFFICIENT"], rewrites=["KPI 改善"])
 
     result = run_agent(client, "kpi改善", top_k=5, max_attempts=3)
@@ -232,7 +229,7 @@ def test_empty_results_skip_grade_llm_call(fake_pipeline):
 
     result = run_agent(client, "質問", top_k=5, max_attempts=3)
 
-    assert client.grade_calls == 1  # 0件の回はLLMを呼ばずに「不十分」とする
+    assert client.grade_calls == 1  # zero hits count as insufficient without an LLM call
     assert result.attempts == 2
     assert fake_pipeline.generated_with == ["a"]
 
@@ -246,22 +243,21 @@ def test_history_and_filters_are_passed_correctly(fake_pipeline):
     run_agent(client, "それについて詳しく", filters=filters, history=history, top_k=5, max_attempts=3)
 
     first, second = fake_pipeline.search_calls
-    # 初回はsearch()側の履歴込みクエリ書き換えに任せる。2回目以降はrewrite済みなので渡さない。
+    # First search lets search() rewrite with history; later queries are already rewritten.
     assert first["history"] == history
     assert second["history"] is None
     assert first["filters"] == second["filters"] == filters
 
 
 def test_retry_keeps_earlier_evidence_when_latest_fills_top_k(fake_pipeline):
-    # 再検索がtop_k件ちょうどを返しても、前回の上位の根拠が押し出されないこと
-    # （codexレビューで指摘されたケース）。
+    # Regression (codex review): a retry returning exactly top_k hits must not push out earlier evidence.
     fake_pipeline.results = [[_sc("first-a"), _sc("first-b")], [_sc("second-a"), _sc("second-b")]]
     client = _ScriptedAgentClient(grades=["INSUFFICIENT", "SUFFICIENT"], rewrites=["別のクエリ"])
 
     run_agent(client, "質問", top_k=2, max_attempts=3)
 
     assert fake_pipeline.generated_with == ["second-a", "first-a"]
-    # 2回目の判定にも、前回の根拠が含まれている。
+    # The second grade also sees the earlier evidence.
     assert "first-a" in client.grade_prompts[1]
 
 
@@ -287,7 +283,7 @@ def test_grade_prompt_without_history_has_no_history_block(fake_pipeline):
 
 
 def test_single_search_skips_final_rerank(fake_pipeline):
-    # 1回だけならsearch()内で並べ直し済みなので、最終選定でLLMを呼ばない。
+    # A single search was already reranked inside search(); no second LLM rerank.
     fake_pipeline.results = [[_sc("a")]]
     client = _ScriptedAgentClient(grades=["SUFFICIENT"])
 
@@ -297,8 +293,8 @@ def test_single_search_skips_final_rerank(fake_pipeline):
 
 
 def test_final_rerank_sees_all_collected_chunks_and_decides_order(fake_pipeline):
-    # 交互の並びのままtop_kで切ると落ちる「1回目の2位」も、最終選定の候補には入ること
-    # （実データでbaselineの正解がこれで落ちたケース）。
+    # Regression: cutting the interleaved list at top_k dropped round 1's #2, which on real data
+    # was the baseline's correct hit. The final rerank must see every collected chunk.
     fake_pipeline.results = [[_sc("a1"), _sc("a2")], [_sc("b1"), _sc("b2")], [_sc("c1"), _sc("c2")]]
     fake_pipeline.rerank_order = lambda cands: sorted(cands, key=lambda sc: sc.chunk.chunk_id != "a2")
     client = _ScriptedAgentClient(grades=["INSUFFICIENT"] * 3, rewrites=["クエリ2", "クエリ3"])
@@ -331,11 +327,10 @@ def test_top_k_limits_chunks_passed_to_generation(fake_pipeline):
     assert [sc.chunk.chunk_id for sc in result.scored_chunks] == ["a", "b"]
 
 
-# --- 純粋関数 --------------------------------------------------------------------
+# --- Pure functions --------------------------------------------------------------
 
 
 def test_merge_chunks_interleaves_by_rank_latest_first():
-    # 新しい回が先頭。各回の1位→各回の2位→…の順に並ぶ。
     merged = _merge_chunks([[_sc("c"), _sc("d")], [_sc("a"), _sc("b")]])
     assert [sc.chunk.chunk_id for sc in merged] == ["c", "a", "d", "b"]
 
@@ -358,7 +353,7 @@ def test_merge_chunks_handles_uneven_and_empty_results():
         ("INSUFFICIENT", "insufficient"),
         ("  sufficient。\n", "sufficient"),
         ("Insufficient.", "insufficient"),
-        # 部分一致で拾わない（"INSUFFICIENT"の中の"SUFFICIENT"等）。
+        # No substring matches (e.g. "SUFFICIENT" inside "INSUFFICIENT").
         ("SUFFICIENT because the context covers it", None),
         ("答え: INSUFFICIENT", None),
         ("", None),
@@ -401,7 +396,7 @@ def test_unknown_grade_mode_raises(fake_pipeline):
         run_agent(_ScriptedAgentClient(), "質問", top_k=5, max_attempts=3, grade_mode="medium")
 
 
-# --- first_query="rewrite"（1回目から検索クエリを作る）-----------------------------------
+# --- first_query="rewrite" (plan a query before the first search) ---------------------
 
 
 def test_rewrite_first_searches_with_planned_query_not_raw_question(fake_pipeline):
@@ -424,7 +419,7 @@ def test_rewrite_first_searches_with_planned_query_not_raw_question(fake_pipelin
 
 
 def test_rewrite_first_does_not_pass_history_to_search(fake_pipeline):
-    # planノードが履歴を踏まえてクエリを作るので、search()側で二重に書き換えさせない。
+    # The plan node already used the history; search() must not rewrite it a second time.
     fake_pipeline.results = [[_sc("a")]]
     client = _ScriptedAgentClient(grades=["SUFFICIENT"], plans=["新商品ローンチの費用"])
     history = [("新商品ローンチの失敗事例は？", "RPT-001が参考になります。")]
@@ -445,7 +440,7 @@ def test_rewrite_first_falls_back_to_raw_question_on_plan_failure(fake_pipeline,
 
     (call,) = fake_pipeline.search_calls
     assert call["query"] == "質問"
-    assert call["history"] == history  # 従来の初回と同じ（search()が履歴込みで書き換える）
+    assert call["history"] == history  # same as a raw first search: search() rewrites with history
     assert result.answer is not None
 
 
@@ -477,7 +472,7 @@ def test_unknown_first_query_raises(fake_pipeline):
 
 
 def test_rewrite_first_loop_stops_at_max_attempts(fake_pipeline):
-    # planノードが増えても、recursion_limitに引っかからず、max_attemptsで止まること。
+    # The extra plan node must not hit recursion_limit before max_attempts stops the loop.
     fake_pipeline.results = [[_sc("a")], [_sc("b")], [_sc("c")]]
     client = _ScriptedAgentClient(
         grades=["INSUFFICIENT"] * 3, rewrites=["クエリ2", "クエリ3"], plans=["クエリ1"]
@@ -490,13 +485,13 @@ def test_rewrite_first_loop_stops_at_max_attempts(fake_pipeline):
 
 
 def test_grade_is_skipped_once_the_search_cap_is_reached(fake_pipeline):
-    # 上限に達したら、判定のLLMを呼ばない（結果はどちらでも回答生成に進むだけなので、無駄な呼び出し）。
+    # At the cap, grading is a wasted LLM call: either verdict goes straight to answering.
     fake_pipeline.results = [[_sc("a")], [_sc("b")], [_sc("c")]]
     client = _ScriptedAgentClient(grades=["INSUFFICIENT"] * 2, rewrites=["クエリ2", "クエリ3"])
 
     result = run_agent(client, "質問", top_k=5, max_attempts=3)
 
-    assert client.grade_calls == 2  # 3回目の検索のあとは判定しない
+    assert client.grade_calls == 2  # no grade after the third search
     assert any("判定: 省略" in t for t in result.trace)
     assert result.answer is not None
 

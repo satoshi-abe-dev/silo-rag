@@ -1,12 +1,10 @@
-"""ローカル LLM / 埋め込み / VLM サーバー（LM Studio 等）への OpenAI 互換クライアント。
+"""OpenAI-compatible client for a local LLM/embedding/VLM server (e.g. LM Studio).
 
-`/chat/completions`（テキスト・画像入力とも） と `/embeddings` を httpx で直接叩くだけ。
-openai パッケージには依存しない。接続先は config.ai.base_url。既定は LM Studio の
-http://localhost:1234/v1。Ollama など OpenAI 互換 API を出す他基盤に差し替えても動く。
-
-外部ネットワークへは接続しない（base_url が localhost 前提）。
-meeting-minutes プロジェクト（src/meeting_minutes/model/llm_client.py）の設計思想
-（接続エラー・タイムアウト・コンテキスト長オーバーに親切なヒントを出す）を踏襲している。
+Calls `/chat/completions` (text and image) and `/embeddings` directly via httpx, without
+the openai package. Targets config.ai.base_url (LM Studio's localhost by default; any
+OpenAI-compatible server such as Ollama works). No external network access.
+Like meeting-minutes' llm_client.py, errors carry helpful hints for connection failures,
+timeouts, and context-length overflows.
 """
 
 from __future__ import annotations
@@ -15,7 +13,7 @@ from .config import AIConfig
 
 
 class LLMConnectionError(RuntimeError):
-    """ローカル LLM サーバーに接続できない／エラー応答のときに送出する。"""
+    """Raised when the local LLM server is unreachable or returns an error."""
 
 
 class LLMClient:
@@ -30,7 +28,7 @@ class LLMClient:
             headers={"Authorization": f"Bearer {config.api_key}"},
         )
 
-    # --- 低レベル ---------------------------------------------------------
+    # --- Low level ---------------------------------------------------------
     def _post(self, path: str, payload: dict) -> dict:
         try:
             resp = self._client.post(path, json=payload)
@@ -72,31 +70,29 @@ class LLMClient:
             raise LLMConnectionError(f"LM Studioの応答を解釈できません: {data}") from exc
 
         if not content:
-            # Qwen3系などの推論モデルは、可視の回答を書く前に思考トークンを消費する。
-            # max_tokensが小さいと思考だけで使い切り、contentが空のまま返ってくる。
+            # Reasoning models (e.g. Qwen3) can spend all of a small max_tokens on thinking,
+            # leaving content empty.
             reasoning = message.get("reasoning_content") or message.get("reasoning") or ""
             if reasoning:
                 raise LLMConnectionError(
                     f"モデルが思考内容（{len(reasoning)}文字）のみを返し、回答本文が空でした。"
                     "max_tokensを増やしてください。"
                 )
-            # reasoning も無いのに空文字（拒否応答など）が返ってきたケース。空のまま
-            # 呼び出し元に返すと、呼び出し側が「成功」として扱い既存データを壊しかねない
-            # ため、ここで必ずエラーにする。
+            # Empty without reasoning (e.g. a refusal): always raise, or callers may treat it
+            # as success and overwrite existing data.
             raise LLMConnectionError(f"LM Studioが空の応答を返しました: {data}")
 
         finish_reason = choice.get("finish_reason")
         if finish_reason == "length":
-            # max_tokensを使い切って途中で打ち切られた応答。合成データ生成では
-            # 「教訓・つまずいたポイント」など末尾セクションが欠落したまま
-            # 保存されてしまうため、黙って受理せず呼び出し側にエラーとして伝える。
+            # Truncated at max_tokens: raise, or synthetic reports get saved missing their
+            # final sections (e.g. lessons learned).
             raise LLMConnectionError(
                 f"応答がmax_tokens（{len(content)}文字生成した時点）で打ち切られました。"
                 "max_tokensを増やすか、入力を短くしてください。"
             )
         return content
 
-    # --- 高レベル -------------------------------------------------------
+    # --- High level ------------------------------------------------------
     def chat(
         self,
         system: str,
@@ -106,7 +102,7 @@ class LLMClient:
         max_tokens: int | None = None,
         temperature: float = 0.2,
     ) -> str:
-        """テキストのみのチャット補完。合成データ生成や回答生成に使う。"""
+        """Text-only chat completion (synthetic data and answer generation)."""
         payload = {
             "model": model or self.config.llm_model,
             "messages": [
@@ -127,10 +123,9 @@ class LLMClient:
         model: str | None = None,
         max_tokens: int = 300,
     ) -> str:
-        """画像1枚をvisionモデル（VLM）に説明させる。ingestの画像キャプション取得に使う。
+        """Describe one image with the VLM (`config.vlm_model`); used for ingest captions.
 
-        LM StudioにロードしたVLMを`config.vlm_model`で指定する（未ロードならエラーになる。
-        呼び出し側で捕捉するかどうかは呼び出し側の判断に委ねる＝ここでは握りつぶさない）。
+        Raises if the VLM isn't loaded; errors are left for the caller to handle.
         """
         import base64
 
@@ -154,7 +149,7 @@ class LLMClient:
         return self._post_chat(payload).strip()
 
     def embed(self, texts: list[str], *, model: str | None = None) -> list[list[float]]:
-        """テキスト群を埋め込みベクトルに変換する。"""
+        """Embed a list of texts."""
         if not texts:
             return []
         payload = {"model": model or self.config.embed_model, "input": texts}
@@ -166,7 +161,7 @@ class LLMClient:
             raise LLMConnectionError(f"LM Studioの埋め込み応答を解釈できません: {data}") from exc
 
     def ping(self) -> bool:
-        """サーバーに到達できるか軽く確認する（GET /models）。"""
+        """Lightweight reachability check (GET /models)."""
         try:
             resp = self._client.get("/models")
             return resp.status_code < 500
