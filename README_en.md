@@ -64,7 +64,18 @@ Adjust the base URL and model names in `config.toml` (environment variables such
 
 Usage has three steps. In **step 1** you prepare the data; in **step 2** you launch the UI and ask questions. **Step 3** is only for when you want the agent mode.
 
+> [!IMPORTANT]
+> **Run the commands with the virtual environment activated.** Every time you open a new terminal, go to this repository's folder and run:
+>
+> ```bash
+> source .venv/bin/activate
+> ```
+>
+> If `(.venv)` appears at the start of the prompt, it is active. If not, commands stop with errors such as `zsh: command not found: python`.
+
 ### Step 1: Prepare the data (either A or B)
+
+There is only one set of search data: whichever of A and B you run last replaces it (you cannot use both at once).
 
 #### A. Using the demo data
 
@@ -95,6 +106,7 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 > [!WARNING]
 > **Things to know before using your own reports** (every number in this README comes from the synthetic data)
 >
+> - **`ingest` replaces the search data.** If you loaded the demo data with A first, its search data (ChromaDB) is removed. The synthetic report files (`data/synth_reports/`) stay, so to go back to the demo, run `python -m silo_rag.ingest` without a folder. If `ingest` fails partway, nothing is replaced and the existing data is not damaged
 > - **You cannot measure accuracy as is.** `eval` (which measures retrieval accuracy and answer quality) needs the synthetic data's own questions and correct answers. To measure on your reports, you have to prepare questions with known correct answers yourself
 > - **Do not rely on the accuracy figures in this README.** hit_rate and the rest are results on the synthetic data (60 reports). The same accuracy is not guaranteed on your reports
 > - **The UI's filters (department / project type) use the demo's fixed vocabulary.** They may not match your categories. Cross-department search itself works without the filters
