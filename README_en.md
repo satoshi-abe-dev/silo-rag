@@ -26,8 +26,8 @@ The "answer mode" in the sidebar switches between the plain mode and the agent m
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/gui_plain.png" alt="The plain mode: with the sidebar set to the plain mode, a question returns an answer and the past cases it drew on"><br><b>Plain mode</b>: searches the question almost as is, and shows the answer and the past cases it drew on (citations)</td>
-<td width="50%"><img src="docs/screenshots/gui_agent.png" alt="The agent mode: under the answer, a 'what the agent did' record (query writing, search, grading, answer generation)"><br><b>Agent mode</b> (optional): writes a search query, then searches. A record of what the agent did appears under the answer</td>
+<td width="50%"><img src="docs/screenshots/gui_plain.png" alt="The plain mode: with the sidebar set to the plain mode, a question returns an answer and the past cases it drew on"><br><b>Plain mode</b>: searches the documents with the question as typed. The answer and the past cases it drew on (citations) appear</td>
+<td width="50%"><img src="docs/screenshots/gui_agent.png" alt="The agent mode: under the answer, a 'what the agent did' record (query writing, search, grading, answer generation)"><br><b>Agent mode</b> (optional): rewrites the question into search terms, then searches the documents. The answer and the citations appear, plus a record of what the agent did</td>
 </tr>
 </table>
 
@@ -130,19 +130,19 @@ The sidebar (settings) is on the left; the questions and answers are on the righ
 - **Ask**: type a question in the text box at the bottom and press the "送信" (Send) button. The Enter key adds a new line and does not send (so that confirming Japanese input conversion does not send by mistake). While it works, "検索・回答生成中..." (searching and generating) is shown
 - **Read the answer**: under the answer, "参照した過去事例" (cited past cases) lists the sources as "report ID / section / department". Open one to see the text the answer was based on. If a similar case exists in another department, the answer includes it and says it is from another department
 - **When there is no answer**: if the material has nothing to do with the question, or the input is not a search question (small talk, greetings and so on), it answers "該当する事例が見つかりませんでした" (no matching case found). Questions about counts or totals ("how many in all?", "which is the most common?") get "分かりません" (I don't know), because it only sees the part of the material that the search found
-- **Ask follow-up questions**: questions that build on the previous one (e.g., "tell me more about that") work. The conversation history is used only to interpret search questions (it does not answer "what did I just say?"). Reloading the browser clears the history
-- **Answer mode (sidebar)**: switch between "通常（1回検索）" (plain, one search) and "エージェント（LangGraph・検索クエリを作ってから検索）" (agent: writes a search query, then searches), question by question. "エージェント" appears only after you install the extra libraries in step 4. When the agent answers, "エージェントの動き" (what the agent did: query writing, searching, grading) also appears under the answer
+- **Ask follow-up questions**: questions that build on the previous one (e.g., "tell me more about that") work. In that case, words such as "that" are first turned into concrete words using the conversation history, then the documents are searched (in both modes). The conversation history is used only to interpret search questions (it does not answer "what did I just say?"). Reloading the browser clears the history
+- **Answer mode (sidebar)**: switch between "通常" (plain: searches the documents with the question as typed) and "エージェント" (agent: rewrites the question into search terms, then searches the documents), question by question. Each option also shows this description under it on the screen. "エージェント" appears only after you install the extra libraries in step 4. When the agent answers, "エージェントの動き" (what the agent did: query writing, searching, grading) also appears under the answer
 - **Filters (optional, sidebar)**: narrow the search by "作成部署" (department) and "プロジェクト種別" (project type). Without them, it searches across all departments (with your own reports the categories may not match; see the caution in step 1 B)
 
 ### Step 4 (optional): Install the agent mode
 
-Plain mode searches with the question almost as is, then answers. The agent mode has the AI write search-friendly words (a search query) from the question first, then search. It needs extra libraries (plain mode works without them).
+Plain mode searches the documents with the question as typed, then answers. The agent mode rewrites the question into search terms (a search query), then searches the documents and answers. It needs extra libraries (plain mode works without them).
 
 ```bash
 pip install -e ".[agent]"
 ```
 
-Once installed, "エージェント" (agent) appears under "answer mode" in the sidebar (how to switch is in step 3). Its settings and how to measure it are in [the agent mode's design](docs/agent_en.md).
+Once installed, "エージェント" (agent) appears under "answer mode" in the sidebar (how to switch is in step 3). Which model does which step is under "Which model does what" in the [architecture](#architecture). Its settings and how to measure it are in [the agent mode's design](docs/agent_en.md).
 
 ## Constraints and scope
 
@@ -238,11 +238,18 @@ graph TB
 | G (optional) | `agent.py` | The agent mode (LangGraph) |
 | H (optional) | `langchain_adapter.py` | Answers with LangChain's stock agent, to compare it with G |
 
+**Which model does what** (all run on your own computer; set under `[ai]` in `config.toml` as `llm_model`, `embed_model` and `vlm_model`)
+
+- **Rewriting the question into search-friendly words** (agent mode; plain mode can turn it on in the settings): the chat LLM
+- **Searching the documents**: keyword search (BM25, a formula that scores how the words appear, not an AI model) and the embedding model (turns sentences into lists of numbers and finds close meanings) collect the candidates; the chat LLM then reranks them by how well they fit the question
+- **Making words like "that" concrete, and writing the answer**: the chat LLM
+- **Turning images in the reports into text** (at ingestion): the model that can read images (VLM)
+
 The AI models each node uses, and how the search works (BM25 keyword search and vector search, which looks for meaning), are in [how it works](docs/architecture_en.md). A [worked example](docs/worked_example_en.md) follows one question all the way to an answer with real values.
 
 ## The agent mode (nodes G and H)
 
-- **What it does**: plain mode searches once with the question almost as is. The agent mode (node G) uses LangGraph (a library for building the flow of an AI's steps) to run "write a search query → search → grade whether the evidence is enough → if not, search again with other words". Node H has the ready-made agent that comes with LangChain (a library for building AI applications) do the same job, so it can be compared with G
+- **What it does**: plain mode searches the documents once with the question as typed. The agent mode (node G) uses LangGraph (a library for building the flow of an AI's steps) to run "write a search query → search → grade whether the evidence is enough → if not, search again with other words". Node H has the ready-made agent that comes with LangChain (a library for building AI applications) do the same job, so it can be compared with G
 - **Results**: compared by the share of questions whose correct document was found (hit_rate). On a smaller model (7B, i.e. 7 billion parameters) with 15 questions, the agent mode looked much better (plain 0.60 → agent 0.93). But those 15 questions are the ones I was looking at when designing it. Re-measured on 45 questions, 7B went 0.71 → 0.76, a difference within chance. On a larger model (32B, 32 billion), the agent mode's behavior (write a search query, then search once) was measured in plain mode: 0.76 → 0.80, also within chance
 - **Conclusion**: plain mode stays the default answer mode; the agent mode is kept as an option
 - **More**: how it is built and why, in [the agent mode's design](docs/agent_en.md); the tables and how it was measured, in [the agent mode's evaluation](docs/agent_evaluation_en.md)

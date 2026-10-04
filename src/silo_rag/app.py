@@ -43,17 +43,24 @@ def _filter_widgets() -> dict[str, str]:
     return filters
 
 
-_MODE_BASELINE = "通常（1回検索）"
-_MODE_AGENT = "エージェント（LangGraph・検索クエリを作ってから検索）"
+_MODE_BASELINE = "通常"
+_MODE_AGENT = "エージェント"
+_MODE_CAPTIONS = ["質問をそのまま使って、資料を探す", "質問を検索語に直して、資料を探す"]
+# The captions are about as wide as the sidebar, so whether they fit depends on the font and zoom.
+# keep-all stops breaks inside Japanese words: if a caption wraps, it wraps after the comma.
+_CAPTION_STYLE = '<style>[data-testid="stRadioCaption"] p { word-break: keep-all; }</style>'
 
 
 def _mode_widget() -> str:
     """Answer-mode selector; baseline only if the optional langgraph extra (.[agent]) is missing."""
+    st.html(_CAPTION_STYLE)
     st.sidebar.header("回答方式")
     if importlib.util.find_spec("langgraph") is None:
         st.sidebar.caption('エージェントを使うには `pip install -e ".[agent]"` が必要です。')
         return _MODE_BASELINE
-    return st.sidebar.radio("方式", [_MODE_BASELINE, _MODE_AGENT], label_visibility="collapsed")
+    return st.sidebar.radio(
+        "方式", [_MODE_BASELINE, _MODE_AGENT], captions=_MODE_CAPTIONS, label_visibility="collapsed"
+    )
 
 
 def _render_trace(trace: list[str] | None) -> None:

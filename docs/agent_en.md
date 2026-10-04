@@ -14,7 +14,7 @@ What this document covers:
 
 ## Plain mode and agent mode
 
-- **Plain mode** (default): searches with the question almost as is, once, and answers from what it finds
+- **Plain mode** (default): searches the documents once with the question as typed, and answers from what it finds
 - **Agent mode** (optional): an LLM first writes search-friendly words (a search query) from the question, then searches. A setting makes it search again with other words when the evidence falls short (by default it does not)
 
 How to install it and switch modes on the screen is in steps 3 and 4 of [Usage](../README_en.md#usage) in the README.
