@@ -1,17 +1,12 @@
-"""合成データ生成（DAGノードA）。
+"""Node A: synthetic report and QA generation.
 
-業界・職種を問わない、部署横断のプロジェクト知見・教訓に関する、社内ナレッジ検索RAGの
-デモ用ダミーレポートを生成する。
+Generates dummy cross-department project retrospectives for the internal knowledge-search RAG demo.
 
-前提:
-    - 実在・架空を問わず企業名は一切出さない。「ある1社内の複数部署」という匿名設定。
-    - 部署間で情報共有が完全には統一されていない状況を再現するため、部署ごとに
-      見出し語彙（ハウススタイル）を微妙に変える。
-    - ファイル形式（Markdown/Word/Excel/PowerPoint/PDF）はレポートごとにランダムに
-      割り当てる（部署には固定しない。現場でファイル形式が混在している状況の再現）。
-    - 対象は業種・職種を問わない一般的な社内プロジェクトの振り返り・教訓。
+- No company names, real or fictional: an anonymous set of departments within one company.
+- Each department uses slightly different heading vocabulary, mimicking inconsistent house styles.
+- File format (Markdown/Word/Excel/PowerPoint/PDF) is random per report, not tied to a department.
 
-生成はローカルLLM（LM Studio等、OpenAI互換API）経由。`python -m silo_rag.datagen` で実行する。
+Uses a local OpenAI-compatible LLM (e.g. LM Studio). Run with `python -m silo_rag.datagen`.
 """
 
 from __future__ import annotations
@@ -26,7 +21,7 @@ from pathlib import Path
 from .config import EVAL_DIR, SYNTH_REPORTS_DIR, load_config
 from .llm_client import LLMClient, LLMConnectionError
 
-# --- ドメイン語彙 -----------------------------------------------------------
+# --- Domain vocabulary ------------------------------------------------------
 
 PROJECT_TYPES = [
     "新規事業立ち上げ",
@@ -61,7 +56,7 @@ DEPARTMENTS: dict[str, list[str]] = {
     ],
 }
 
-# 部署ごとのハウススタイル（見出し語彙の揺れ）。部署間で用語が統一されていない状況を再現する。
+# Per-department heading vocabulary, mimicking terminology that isn't unified across departments.
 DEPT_TERMINOLOGY: dict[str, dict[str, str]] = {
     "マーケティング部": {"background": "実施条件", "approach": "推進体制"},
     "営業推進部": {"background": "前提条件", "approach": "実行体制"},
@@ -70,11 +65,11 @@ DEPT_TERMINOLOGY: dict[str, dict[str, str]] = {
     "経営企画部": {"background": "与件", "approach": "実行計画"},
 }
 
-# ファイル形式は部署に固定せず、レポートごとにランダムに割り当てる（どの部署でも
-# 複数の形式が混在しうる）。部署間の非統一性は用語（DEPT_TERMINOLOGY）側で表現する。
+# Assigned randomly per report, not per department; departmental inconsistency lives in
+# DEPT_TERMINOLOGY instead.
 FILE_FORMATS = ["md", "docx", "xlsx", "pdf", "pptx"]
 
-# メタデータの固定フィールド順。Word/Excel/PowerPoint/PDFの書き出しで共通して使う。
+# Fixed metadata field order shared by every writer.
 METADATA_FIELDS = ["report_id", "dept", "project_type", "subject", "method", "resourcing", "author", "date"]
 
 LESSONS = [
@@ -113,7 +108,7 @@ class ReportSpec:
 
 
 def generate_report_specs(count: int, *, seed: int | None = None) -> list[ReportSpec]:
-    """部署・プロジェクト種別を横断的にカバーするようレポート仕様を生成する（層化サンプリング）。"""
+    """Build report specs that cover every department/project-type pair (stratified sampling)."""
     rng = random.Random(seed)
     depts = list(DEPARTMENTS.keys())
     combos = [(d, a) for d in depts for a in PROJECT_TYPES]
@@ -195,10 +190,10 @@ _SECTION_HEADING_RE = re.compile(r"^## +(.+?)\s*$", re.MULTILINE)
 
 
 def _split_sections(body: str) -> list[tuple[str, str]]:
-    """本文を `## 見出し` 単位で (見出し, 本文) のリストに分割する。
+    """Split the body into (heading, text) pairs at each `## heading`.
 
-    ingest.split_into_sections() と同じ考え方だが、datagenがingestに依存する
-    （DAGの向きと逆の結合が生じる）のを避けるため、ここで独自に持つ。
+    Mirrors ingest.split_into_sections() but is duplicated here so datagen doesn't depend on
+    ingest (which would couple against the DAG direction).
     """
     matches = list(_SECTION_HEADING_RE.finditer(body))
     sections: list[tuple[str, str]] = []
@@ -211,11 +206,10 @@ def _split_sections(body: str) -> list[tuple[str, str]]:
 
 
 def _validate_report_body(spec: ReportSpec, body: str) -> None:
-    """生成された本文が、ingest側が期待する `## 見出し` 構成を満たしているか検証する。
+    """Check that the generated body has the `## heading` structure ingest expects.
 
-    見出しの level（`##`）や語彙がずれていたり、本文が空のセクションがあると、
-    ingest.split_into_sections() が対象セクションを拾えず検索対象から漏れてしまう。
-    そのまま前回の正常なデータセットを上書きしないよう、ここで必ず弾く。
+    A wrong heading level or wording, or an empty section, would silently drop content from the
+    index, so reject it here before it can overwrite the previous good dataset.
     """
     term = DEPT_TERMINOLOGY[spec.dept]
     required = [
@@ -235,7 +229,7 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
     if missing:
         raise LLMConnectionError(f"{spec.report_id}: 生成レポートに必須セクションが欠けています: {missing}")
 
-    # 同じ見出しが重複すると、ingest側でチャンクIDが衝突してChromaへの格納に失敗する。
+    # Duplicate headings would produce colliding chunk IDs and make the Chroma insert fail.
     duplicated = sorted({h for h in headings if headings.count(h) > 1})
     if duplicated:
         raise LLMConnectionError(f"{spec.report_id}: 見出しが重複しています: {duplicated}")
@@ -252,33 +246,30 @@ def _validate_report_body(spec: ReportSpec, body: str) -> None:
 
 _MAX_GENERATION_ATTEMPTS = 3
 
-# レポート単位のリトライ（_MAX_GENERATION_ATTEMPTS）を使い切っても、1件がどうしても
-# 見出し構成を守れないことがある。ユーザーに手動で再実行させる代わりに、バッチ全体を
-# 自動的に最初からやり直す（温度付きサンプリングなので、やり直せば大抵は成功する）。
+# A report can still break the heading structure after all per-report retries; rather than make the
+# user rerun by hand, restart the whole batch (with temperature sampling, a rerun usually succeeds).
 _MAX_BATCH_ATTEMPTS = 3
 
-# 画像を必ず添付するセクション。全部署共通の見出しなので固定できる
-# （DEPT_TERMINOLOGYで語彙が揺れるのはbackground/approachのみ）。
+# Section that always gets the result image. Safe to hard-code: only background/approach vary
+# by department.
 RESULT_IMAGE_SECTION = "成果サマリー"
 
 
 def _generate_result_image(spec: ReportSpec) -> bytes:
-    """プロジェクト種別に応じて、それらしい成果グラフをmatplotlibで合成する。
+    """Draw a plausible dummy result chart for the project type with matplotlib.
 
-    実際の集計結果ではなく、あくまで「画像が埋め込まれたレポート」を再現する
-    ためのダミー画像（report_idから決定的に乱数シードを作るので再現性がある）。
+    Not real data; it only exists so reports contain an embedded image. Seeded from report_id.
     """
     import io
 
     import matplotlib
 
-    matplotlib.use("Agg")  # ヘッドレス環境向け（GUIバックエンドを使わない）
+    matplotlib.use("Agg")  # headless: no GUI backend
     import matplotlib.pyplot as plt
     import numpy as np
 
-    # 既定フォント（DejaVu Sans）は日本語グリフを持たず、ラベルが文字化けする
-    # （豆腐表示＋UserWarning）。主要OSに入っている日本語対応フォントを優先させ、
-    # どれも無い環境ではDejaVu Sansにフォールバックする。
+    # The default DejaVu Sans has no Japanese glyphs (tofu boxes plus a UserWarning), so prefer
+    # common OS Japanese fonts and fall back to DejaVu Sans only if none is installed.
     plt.rcParams["font.sans-serif"] = [
         "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo",
         "Noto Sans CJK JP", "IPAexGothic", "DejaVu Sans",
@@ -322,15 +313,11 @@ def _generate_result_image(spec: ReportSpec) -> bytes:
 def _generate_one_report(
     client: LLMClient, spec: ReportSpec
 ) -> tuple[dict[str, str], list[tuple[str, str]], bytes]:
-    """1件のレポートを生成し、(メタデータ, [(見出し, 本文), ...], 成果画像PNGバイト列) を返す。
+    """Generate one report in memory; return (metadata, [(heading, text), ...], result PNG bytes).
 
-    小型のローカルLLMは、指定した見出し構成を毎回厳密には守れないことがある
-    （実際に60件中1件、見出し欠落で失敗する事例が起きた）。温度付き(0.7)サンプリング
-    なので同じ入力でも生成のたびに結果が変わることを利用し、生成→検証に失敗したら
-    数回リトライしてから諦める。
-
-    ここではまだファイルには書き出さない（書式はspec.file_formatによって異なり、
-    実際の書き出しはgenerate_reports()が全件成功を確認してから行う）。
+    Small local LLMs don't always follow the heading structure (1 in 60 reports once failed on a
+    missing heading), so retry a few times; with temperature 0.7 each attempt differs.
+    Nothing is written here: generate_reports() writes only after every report succeeds.
     """
     system, user = build_prompt(spec)
     last_error: LLMConnectionError | None = None
@@ -349,7 +336,7 @@ def _generate_one_report(
     raise last_error
 
 
-# --- フォーマット別の書き出し ------------------------------------------------
+# --- Per-format writers -----------------------------------------------------
 
 
 def _report_title(metadata: dict[str, str]) -> str:
@@ -410,7 +397,7 @@ def _write_xlsx(metadata: dict[str, str], sections: list[tuple[str, str]], image
         ws.cell(row=i, column=1, value=key)
         ws.cell(row=i, column=2, value=metadata[key])
 
-    start_row = len(METADATA_FIELDS) + 2  # メタデータの後に1行空ける
+    start_row = len(METADATA_FIELDS) + 2  # one blank row after the metadata
     image_anchor_row = start_row
     for offset, (heading, text) in enumerate(sections):
         row = start_row + offset
@@ -419,7 +406,7 @@ def _write_xlsx(metadata: dict[str, str], sections: list[tuple[str, str]], image
         if heading == RESULT_IMAGE_SECTION:
             image_anchor_row = row
 
-    # C列以降は本文とかぶらないよう空けてあるので、そこに画像を差し込む。
+    # Columns C onward are empty, so the image won't cover any text.
     ws.add_image(XLImage(io.BytesIO(image)), f"D{image_anchor_row}")
 
     wb.save(str(path))
@@ -432,7 +419,7 @@ def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], image
     from pptx.util import Inches
 
     prs = Presentation()
-    layout = prs.slide_layouts[1]  # タイトル + コンテンツ
+    layout = prs.slide_layouts[1]  # Title and Content
 
     meta_slide = prs.slides.add_slide(layout)
     meta_slide.shapes.title.text = "レポートメタデータ"
@@ -451,16 +438,14 @@ def _write_pptx(metadata: dict[str, str], sections: list[tuple[str, str]], image
 
 
 def _pdf_lines(metadata: dict[str, str], sections: list[tuple[str, str]]) -> list[str]:
-    """PDFページに描画するテキスト行を組み立てる（reportlabに依存しない純粋関数）。
+    """Build the text lines drawn on the PDF pages (pure function, no reportlab).
 
-    ingest._parse_pdf_text() はこの行の並びを前提にパースする。reportlab/pypdf
-    どちらもインストールされていない環境でも、この関数とingest側のパーサーだけで
-    往復（書く→読む）ロジックの整合性をテストできるように、描画処理と分離してある。
+    ingest._parse_pdf_text() relies on this line layout. Kept separate from drawing so the
+    write/read round trip can be tested without reportlab or pypdf installed.
     """
     import textwrap
 
-    # 日本語はreportlabのdrawStringが自動折り返ししないため、あらかじめ
-    # 全角換算で1行38文字程度に折り返してから描画する。
+    # reportlab's drawString doesn't wrap, so pre-wrap at about 38 full-width characters.
     lines: list[str] = [f"{key}: {metadata[key]}" for key in METADATA_FIELDS]
     lines.append("")
     for heading, text in sections:
@@ -504,7 +489,7 @@ def _write_pdf(metadata: dict[str, str], sections: list[tuple[str, str]], image:
         c.drawImage(image_reader, left_margin, y - img_height, width=img_width, height=img_height)
         y -= img_height + line_height
 
-    # 「## 成果サマリー」セクションの末尾（次の見出し行の直前、または全行の末尾）に画像を差し込む。
+    # Draw the image at the end of the result section: before the next heading or after the last line.
     in_result_section = False
     for line in lines:
         if line.startswith("## "):
@@ -538,16 +523,15 @@ _WRITERS = {
 def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 全件のLLM生成が完了してからディスクに書き出す。途中のリクエストが失敗しても
-    # 前回のデータセット（およびそれと対応するqa_pairs.json）を壊さないため。
+    # Generate everything before writing, so a mid-run failure can't break the previous dataset
+    # (or its matching qa_pairs.json).
     generated: dict[str, tuple[dict[str, str], list[tuple[str, str]], bytes]] = {}
     for spec in specs:
         generated[spec.report_id] = _generate_one_report(client, spec)
         print(f"generated (in-memory): {spec.report_id}")
 
-    # ここまで来て初めて、前回の生成物を一掃して書き出す。--count を減らして
-    # 再実行したときに古いレポートが残り、今回のQAペアと矛盾したデータセットに
-    # なるのを防ぐ（対象は今回使いうる全フォーマットの拡張子＋Markdown用の画像png）。
+    # Only now clear the previous output (every format plus Markdown's PNGs), so rerunning with a
+    # smaller --count doesn't leave stale reports that contradict the new QA pairs.
     for fmt in [*FILE_FORMATS, "png"]:
         for stale in out_dir.glob(f"RPT-*.{fmt}"):
             stale.unlink()
@@ -558,22 +542,19 @@ def generate_reports(client: LLMClient, specs: list[ReportSpec], out_dir: Path) 
         print(f"wrote: {path}")
 
 
-# --- 評価用 gold-standard QAペア -------------------------------------------
+# --- Gold-standard evaluation QA pairs --------------------------------------
 
 
 def generate_eval_qa(specs: list[ReportSpec], count: int, *, seed: int | None = None) -> list[dict]:
-    """評価用QAペアを作る。一部は「別部署の過去事例を知らずに質問するケース」を含める。
+    """Build evaluation QA pairs, some asked from a department unaware of another's past cases.
 
-    実際のLLM呼び出しはせず、レポート仕様から機械的に問いと正解根拠を組み立てる
-    （gold-standardは人手検証可能な単純な形にしておく）。
+    Built mechanically from the specs, with no LLM call, so the gold standard stays easy to verify by hand.
     """
     rng = random.Random(seed)
     chosen = rng.sample(specs, k=min(count, len(specs)))
 
-    # 設問文にはテーマ名とプロジェクト種別しか出てこないため、同じ(テーマ,種別)の組み合わせを
-    # 持つレポートが複数あると、正解が1件だけだと決め打ちできない（どれも妥当な参照先）。
-    # そのため正解は「同じ組み合わせを持つ全レポートの一覧（各々のdept/evidence付き）」
-    # として持たせる（1件のdept/evidenceで代表させると、他の正解と矛盾する）。
+    # Questions only mention subject and project type, so every report sharing that pair is a valid
+    # answer. The gold set lists all of them, each with its own dept/evidence.
     reports_by_key: dict[tuple[str, str], list[str]] = {}
     spec_by_report_id: dict[str, ReportSpec] = {}
     for s in specs:
@@ -582,7 +563,7 @@ def generate_eval_qa(specs: list[ReportSpec], count: int, *, seed: int | None = 
 
     qa_pairs: list[dict] = []
     for i, spec in enumerate(chosen):
-        cross_dept = i % 3 == 0  # 3件に1件は部署をまたいだ想定の設問にする
+        cross_dept = i % 3 == 0  # every third question is cross-department
         matching_ids = reports_by_key[(spec.subject, spec.project_type)]
         if cross_dept:
             other_depts = [d for d in DEPARTMENTS if d != spec.dept]
@@ -592,8 +573,7 @@ def generate_eval_qa(specs: list[ReportSpec], count: int, *, seed: int | None = 
                 f"他部署で参考になりそうな過去の{spec.project_type}の事例はありますか？"
                 "特に気をつけるべき落とし穴があれば教えてください。"
             )
-            # 「他部署の事例」を明示的に求めている設問なので、質問者自身の部署の
-            # レポートは正解から除く（同一(テーマ,種別)でも自部署のものは対象外）。
+            # The question asks for other departments' cases, so exclude the asker's own reports.
             gold_ids = [r for r in matching_ids if spec_by_report_id[r].dept != asking_dept]
         else:
             asking_dept = spec.dept

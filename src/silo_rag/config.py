@@ -1,12 +1,11 @@
-"""設定の読み込み。
+"""Configuration loading.
 
-優先順位（強い順）:
-    1. 環境変数（SILORAG_ プレフィックス）
-    2. TOML ファイル（既定は config.toml、無ければ config.example.toml）
-    3. コード内のデフォルト値
+Precedence (highest first):
+    1. Environment variables (SILORAG_ prefix)
+    2. TOML file (config.toml, else config.example.toml)
+    3. Defaults in code
 
-TOML は標準ライブラリ tomllib（Python 3.11+）で読む。追加依存なし。
-meeting-minutes プロジェクト（src/meeting_minutes/model/config.py）と同じ考え方を踏襲している。
+Uses stdlib tomllib; same approach as the meeting-minutes project's config.py.
 """
 
 from __future__ import annotations
@@ -19,14 +18,10 @@ from pathlib import Path
 
 
 def _find_repo_root() -> Path:
-    """リポジトリのルートを探す。
+    """Find the repo root by walking up to pyproject.toml.
 
-    `pip install -e .`（本プロジェクトが前提とする導入方法）ならこのファイルは
-    リポジトリ内の src/silo_rag/config.py のまま残るので、pyproject.toml を目印に
-    上へ辿れば見つかる。万一 `pip install .`（非editable）のように site-packages に
-    コピーされていて見つからない場合は、通常のsrcレイアウトの相対位置（2つ上）に
-    フォールバックする（その場合の動作は保証しない。本プロジェクトはeditable
-    インストールまたはリポジトリ直下からの実行のみを想定している）。
+    Works with an editable install (the supported setup). If not found (e.g. a
+    non-editable install into site-packages), falls back to two levels up; unsupported.
     """
     here = Path(__file__).resolve()
     for parent in here.parents:
@@ -35,37 +30,30 @@ def _find_repo_root() -> Path:
     return here.parents[2]
 
 
-# リポジトリのルート。
 REPO_ROOT = _find_repo_root()
 DATA_DIR = REPO_ROOT / "data"
 SYNTH_REPORTS_DIR = DATA_DIR / "synth_reports"
 EVAL_DIR = DATA_DIR / "eval"
 CHROMA_DIR = DATA_DIR / "chroma_db"
-# パッケージ名やリポジトリ名とは独立させておく（改名のたびにコレクション名が変わり、
-# 既存のローカルインデックスが引き継げなくなる問題をcodexレビューで指摘され、修正した）。
+# Kept independent of the package/repo name so a rename doesn't orphan existing local indexes.
 COLLECTION_NAME = "reports"
 
 
 @dataclass
 class AIConfig:
-    """LM Studio等、ローカルモデルサーバーへの接続設定＋そこから使う3種類のモデル指定。
+    """Local model server (e.g. LM Studio) connection settings and the three models used on it.
 
-    base_url/api_key/timeout/max_tokensは接続・リクエストの設定、
-    llm_model/embed_model/vlm_modelは「同じサーバーのどのモデルを使うか」の指定
-    （役割ごとに名前を揃えてある）。どれも同じサーバー（同じbase_url）へのリクエストなので
-    1つのセクションにまとめている（役割ごとにサーバー自体を分けたい場合は、この
-    dataclass自体を分割する必要がある）。
+    All models share one base_url; using separate servers per role would require splitting this class.
     """
 
     base_url: str = "http://localhost:1234/v1"
     api_key: str = "local-no-key"
-    # チャット/生成用モデル。
+    # Chat/generation model.
     llm_model: str = "qwen2.5-7b-instruct"
-    # 埋め込み用モデル。LM Studio に埋め込みモデルをロードしておく必要がある。
+    # Embedding model; must be loaded in LM Studio.
     embed_model: str = "text-embedding-nomic-embed-text-v1.5"
-    # 画像説明（VLM）用モデル。LM Studio にvisionモデルをロードしておく必要がある
-    # （例: Qwen2.5-VL / Qwen3-VL系）。未ロードでも他機能には影響しない
-    # （画像キャプション取得に失敗した場合はログを出して該当画像をスキップするのみ）。
+    # Vision model for image captions (e.g. Qwen2.5-VL / Qwen3-VL). If not loaded, ingest
+    # just logs and skips images; nothing else is affected.
     vlm_model: str = "qwen2.5-vl-7b-instruct"
     timeout: float = 300.0
     max_tokens: int = 2048
@@ -73,32 +61,30 @@ class AIConfig:
 
 @dataclass
 class RetrievalConfig:
-    # ハイブリッド検索でのスコア統合比率（0.0=BM25のみ, 1.0=ベクトルのみ）
+    # Hybrid score blend: 0.0 = BM25 only, 1.0 = vectors only.
     vector_weight: float = 0.5
     top_k_candidates: int = 20
     top_k_final: int = 5
-    # 検索前に、質問からLLMが検索に向いたクエリを作るか（retrieval.plan_query）。
-    # 既定はFalse（質問のまま検索）。
-    # 15問の評価（7B）では効いたが、45問で測り直すと、7B・32Bのどちらでも効果を確認できなかった。
-    # LLM呼び出しが質問ごとに1回増える。README「ノードG」の評価を参照。
+    # Have the LLM build a search query before searching (retrieval.plan_query). Off by default:
+    # it helped on the 15-question eval (7B) but showed no gain on 45 questions with 7B or 32B,
+    # and costs one extra LLM call per question. See docs/agent_evaluation_en.md.
     rewrite_query: bool = False
 
 
 @dataclass
 class AgentConfig:
-    # 既定値（max_attempts=1, first_query="rewrite"）は、小さいモデル（7B）の15問の測定で最も良かった
-    # 組み合わせ（クエリを作って1回検索する）。再検索のループは、クエリ作成に上乗せする効果を、
-    # 7B・32Bのどちらでも確認できなかった。32Bでは通常方式と差が見えず、部署横断が1問下がったので、
-    # 大きいモデルは通常方式を使う。
-    # README「ノードG」の評価を参照。
+    # Defaults (max_attempts=1, first_query="rewrite") scored best on the 15-question 7B eval.
+    # Retry loops added nothing on top of query planning with 7B or 32B; with 32B the agent matched
+    # the standard pipeline and lost one cross-department question, so larger models use the
+    # standard pipeline. See docs/agent_evaluation_en.md.
     #
-    # LangGraphエージェント（agent.py）が検索を繰り返す上限回数（初回の検索を含む）。1なら再検索しない。
-    # 「根拠が十分か」はLLMが判定するが、何回まで繰り返すかはここでコードが決める。
+    # Max searches by the LangGraph agent (agent.py), including the first; 1 = no retry.
+    # The LLM judges whether evidence suffices, but code caps the retries.
     max_attempts: int = 1
-    # 「根拠が十分か」の判定の厳しさ。"strict" か "lenient"（agent.pyの_GRADE_SYSTEM_PROMPTS参照）。
+    # Strictness of the evidence check: "strict" or "lenient" (see agent.py _GRADE_SYSTEM_PROMPTS).
     grade_mode: str = "lenient"
-    # 1回目の検索に使うクエリ。"raw"＝質問そのまま、"rewrite"＝質問からLLMが作ったクエリ
-    # （agent.pyのplanノード）。質問文の名乗りや依頼の言い回しがキーワード検索を散らすため。
+    # First-search query: "raw" = the question as is, "rewrite" = LLM-built query (agent.py plan
+    # node), since self-introductions and request phrasing scatter keyword search.
     first_query: str = "rewrite"
 
 
@@ -110,7 +96,7 @@ class Config:
 
 
 def _to_bool(text: str) -> bool:
-    """環境変数の文字列を真偽値にする。bool("false")は真になるので、文字列で判定する。"""
+    """Parse an env var string as a bool (bool("false") would be True)."""
     value = text.strip().lower()
     if value in ("1", "true", "yes", "on"):
         return True
@@ -144,7 +130,7 @@ _SECTION_TYPES = {
 
 
 def default_config_path() -> Path | None:
-    """使う TOML を決める。config.toml > config.example.toml > なし。"""
+    """Pick the TOML file: config.toml, then config.example.toml, else None."""
     for name in ("config.toml", "config.example.toml"):
         p = REPO_ROOT / name
         if p.is_file():
@@ -153,7 +139,7 @@ def default_config_path() -> Path | None:
 
 
 def _build_section(section_cls: type, raw: dict) -> object:
-    """辞書から dataclass セクションを作る。未知キーは無視し、型は緩く合わせる。"""
+    """Build a dataclass section from a dict, ignoring unknown keys and loosely coercing types."""
     known = {f.name: f for f in fields(section_cls)}
     kwargs = {}
     for key, value in raw.items():
@@ -174,9 +160,9 @@ def _build_section(section_cls: type, raw: dict) -> object:
 
 
 def load_config(path: str | os.PathLike | None = None) -> Config:
-    """設定を読み込む。
+    """Load the configuration.
 
-    path: TOML のパス。None なら default_config_path() を使う。
+    path: TOML path; defaults to default_config_path().
     """
     toml_path: Path | None
     if path is not None:
@@ -191,10 +177,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         with open(toml_path, "rb") as f:
             data = tomllib.load(f)
 
-    # 旧セクション名（"[ai]"へのリネーム前）が残っていると、設定が黙って全部
-    # デフォルト値に戻ってしまう（"ai"キーが無いだけなので例外にならない）。
-    # "[llm]"（最初期の名前）と"[server]"（"[ai]"に決める前に一時的に案内した名前）の
-    # どちらが残っていても気づけるよう、両方チェックする。
+    # A legacy section name ([llm], or the interim [server]) would silently fall back to all
+    # defaults, since a missing "ai" key raises nothing. Warn about either.
     legacy_sections = [name for name in ("llm", "server") if name in data]
     if legacy_sections and "ai" not in data:
         print(
@@ -203,8 +187,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
             "（このままだとconfig.tomlの内容は無視され、コード内のデフォルト値が使われます）。"
         )
 
-    # セクション名は[ai]に直しても、中の"model"キー（現在は"llm_model"）を
-    # リネームし忘れると同様に黙って無視される。こちらも個別に警告する。
+    # Likewise, a leftover "model" key (now "llm_model") would be silently ignored.
     ai_section = data.get("ai") or data.get("server") or data.get("llm") or {}
     if isinstance(ai_section, dict) and "model" in ai_section and "llm_model" not in ai_section:
         print(

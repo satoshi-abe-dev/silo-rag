@@ -1,4 +1,4 @@
-"""設定（config.py）のテスト。TOMLファイルは使わず、既定値と環境変数の上書きだけを見る。"""
+"""Tests for config.py: defaults and environment/TOML overrides."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from silo_rag.config import AgentConfig, RetrievalConfig, load_config
 
 
 def test_agent_defaults_are_the_best_measured_small_model_setting():
-    # README「ノードG」の評価（7Bで最良）に合わせた既定値。変えるときは、評価とREADMEも直すこと。
+    # Matches docs/agent_evaluation_*.md (best on 7B); update that doc and the README if changed.
     defaults = AgentConfig()
 
     assert defaults.first_query == "rewrite"
@@ -29,7 +29,7 @@ def test_agent_settings_can_be_overridden_by_environment(monkeypatch, tmp_path):
 
 
 def test_rewrite_query_is_off_by_default():
-    # 7Bでは効いたが、32Bでは効果が見えなかったので、既定は質問のまま検索する。
+    # Helped on 7B but showed no gain on 32B, so the default searches with the raw question.
     assert RetrievalConfig().rewrite_query is False
 
 
@@ -38,7 +38,7 @@ def test_rewrite_query_is_off_by_default():
     [("true", True), ("1", True), ("On", True), ("false", False), ("0", False), ("off", False)],
 )
 def test_rewrite_query_can_be_set_by_environment(monkeypatch, tmp_path, env_value, expected):
-    # 環境変数は文字列なので、"false"が真にならないこと。
+    # Env values are strings; "false" must not be truthy.
     empty_toml = tmp_path / "empty.toml"
     empty_toml.write_text("", encoding="utf-8")
     monkeypatch.setenv("SILORAG_RETRIEVAL_REWRITE_QUERY", env_value)
@@ -55,7 +55,7 @@ def test_rewrite_query_can_be_set_in_toml(tmp_path):
 
 @pytest.mark.parametrize("env_value", ["1", "3"])
 def test_langchain_search_cap_ignores_the_agent_max_attempts_setting(monkeypatch, env_value):
-    # 自作エージェントの既定を1にしても、既製エージェントの検索上限（3回）は変わらないこと。
+    # The custom agent's max_attempts must not change the LangChain agent's search cap (3).
     from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
     from langchain_core.messages import AIMessage
 

@@ -1,16 +1,11 @@
-"""Streamlit UI（DAGノードF）。
+"""Node F: Streamlit UI (chat plus cited past cases).
 
-質問応答チャット + 引用元（類似事例）一覧を表示する、社内ナレッジ検索RAGのデモUI。
-retrieval.search() と generation.answer_question() をこの層で初めて組み合わせる
-（両モジュールはDAG上お互いに依存しないよう独立実装されているため）。
-サイドバーで「エージェント」を選ぶと、代わりに agent.run_agent()（LangGraph、DAGノードG）で回答し、
-エージェントが何をしたか（クエリ作成・検索・判定・書き直しの記録）を回答の下に表示する。
+The first layer that combines search() and answer_question(), which are independent in the DAG.
+Agent mode uses run_agent() (node G) instead and shows the agent's trace under the answer.
 
-起動方法: streamlit run src/silo_rag/app.py --server.address localhost
-（--server.address localhost を付けないと、同じネットワークの他の機器からも開ける状態になる）
-（`streamlit run` はファイルを直接実行するため、他モジュールのような相対import
-（`from .config import ...`）ではなく絶対import（`from silo_rag.config import ...`）を使う。
-`pip install -e .` 済みであれば、cwdによらず絶対importで解決できる。）
+Run: streamlit run src/silo_rag/app.py --server.address localhost
+(Without --server.address localhost, other machines on the network can open it.)
+`streamlit run` executes this file directly, so use absolute imports (needs `pip install -e .`).
 """
 
 from __future__ import annotations
@@ -35,7 +30,7 @@ def get_client() -> LLMClient:
 
 
 def _filter_widgets() -> dict[str, str]:
-    """サイドバーの絞り込みUI。未選択のキーはfiltersに含めない（＝全件対象）。"""
+    """Sidebar filters; unselected keys are omitted (search everything)."""
     st.sidebar.header("絞り込み（任意）")
     dept = st.sidebar.selectbox("作成部署", ["(指定なし・全部署横断)", *sorted(DEPARTMENTS.keys())])
     project_type = st.sidebar.selectbox("プロジェクト種別", ["(指定なし)", *PROJECT_TYPES])
@@ -53,7 +48,7 @@ _MODE_AGENT = "エージェント（LangGraph・検索クエリを作ってか�
 
 
 def _mode_widget() -> str:
-    """回答方式の切り替え。langgraph（エージェント方式でだけ使う追加のライブラリ。.[agent]）が無い環境では通常モードのみ。"""
+    """Answer-mode selector; baseline only if the optional langgraph extra (.[agent]) is missing."""
     st.sidebar.header("回答方式")
     if importlib.util.find_spec("langgraph") is None:
         st.sidebar.caption('エージェントを使うには `pip install -e ".[agent]"` が必要です。')
@@ -72,7 +67,6 @@ def _render_trace(trace: list[str] | None) -> None:
 def _render_citations(answer: Answer, scored_chunks: list[ScoredChunk]) -> None:
     if not answer.citations:
         return
-    # 引用（report_id, section）に対応する本文スニペットを、検索結果チャンクから引く。
     text_lookup = {
         (sc.chunk.metadata.get("report_id"), sc.chunk.metadata.get("section")): sc.chunk.text
         for sc in scored_chunks
@@ -112,10 +106,8 @@ def main() -> None:
             _render_trace(past_trace)
             _render_citations(answer, scored)
 
-    # st.chat_input はEnterキーで即送信する設計のため、日本語入力時に漢字変換を
-    # 確定するEnterまで送信トリガーになってしまう（IME変換とキー入力が競合する、
-    # CJK言語でよく報告される既知の問題）。st.text_area + 送信ボタンのフォームに
-    # すれば、Enterは改行にしかならず変換確定と送信を安全に分離できる。
+    # st.chat_input submits on Enter, including the Enter that confirms IME conversion.
+    # A text_area + submit button form keeps Enter as a newline.
     with st.form("question_form", clear_on_submit=True):
         question = st.text_area(
             "質問を入力してください（例: 新商品の販促キャンペーンで、他部署の失敗事例を知りたい）",
@@ -127,13 +119,12 @@ def main() -> None:
         return
     question = question.strip()
 
-    # 検索・生成が終わるまでhistoryには入らない（rerun後の履歴ループで初めて表示される）ため、
-    # ここで先に質問だけ表示しておく。フォームはclear_on_submitで空になっており、
-    # 表示しないと処理中の間「何を聞いたか」が画面から消えてしまう。
+    # The form clears on submit and history only shows after rerun, so echo the question now
+    # or it vanishes from the screen while processing.
     with st.chat_message("user"):
         st.write(question)
 
-    # 会話履歴（指示語頼みのフォローアップ質問を検索・生成の両方で解決するために渡す）。
+    # History lets both retrieval and generation resolve follow-up references.
     history = [(q, a.text) for q, a, _, _ in st.session_state.history] or None
 
     trace: list[str] | None = None
@@ -148,8 +139,8 @@ def main() -> None:
                 scored = search(client, question, filters=filters or None, history=history)
                 answer = answer_question(client, question, [sc.chunk for sc in scored], history=history)
         except RuntimeError as exc:
-            # ChromaDBコレクション未作成（ingest未実行）などの構成エラー。
-            # LLMConnectionErrorもRuntimeErrorのサブクラスなので、ここでまとめて表示する。
+            # Setup errors (e.g. no ChromaDB collection because ingest wasn't run);
+            # LLMConnectionError is also a RuntimeError, so it's shown here too.
             st.error(str(exc))
             return
 

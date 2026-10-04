@@ -1,3 +1,3 @@
-"""silo_rag: 部署横断のプロジェクト知見・教訓に関する社内ナレッジ検索RAG。"""
+"""silo_rag: internal RAG search over project lessons learned across departments."""
 
 __version__ = "0.1.0"

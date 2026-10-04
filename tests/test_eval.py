@@ -1,4 +1,4 @@
-"""eval（DAGノードE）のテスト。LLM・検索は使わない（必要な箇所はフェイクに差し替える）。"""
+"""Tests for eval (DAG node E); LLM and search are faked."""
 
 from __future__ import annotations
 
@@ -69,15 +69,14 @@ def test_summarize_subset_empty_returns_none_metrics():
 
 
 def test_summarize_subset_distinguishes_hit_rate_from_recall_at_k():
-    """退行テスト: 以前、goldが複数件ある設問で一部しか拾えていなくても
-    recall_at_kが1.0（hit_rateと同じ値）になってしまうバグがあった。"""
+    """Regression: recall_at_k was 1.0 (same as hit_rate) even when only some of several golds were found."""
     results = [
         _result("QA-001", cross_dept=False, hit=True, recall=1.0, rr=1.0, cited=True, judge=5),
         _result("QA-002", cross_dept=False, hit=True, recall=0.5, rr=1.0, cited=True, judge=3),
     ]
     summary = _summarize_subset(results)
-    assert summary["hit_rate"] == 1.0  # 両方とも1件以上は当たっている
-    assert summary["recall_at_k"] == 0.75  # (1.0 + 0.5) / 2 、hit_rateとは異なる値になる
+    assert summary["hit_rate"] == 1.0  # both have at least one hit
+    assert summary["recall_at_k"] == 0.75  # (1.0 + 0.5) / 2, unlike hit_rate
 
 
 def test_summarize_subset_ignores_none_judge_scores_in_average():
@@ -103,11 +102,11 @@ def test_summarize_splits_cross_dept_and_same_dept():
     assert summary["same_dept"]["hit_rate"] == 0.0
 
 
-# --- パイプライン切り替え・コスト指標・比較表 ------------------------------------------
+# --- Pipeline switching, cost metrics, comparison table ------------------------------
 
 
 class _JudgeClient:
-    """回答生成はフェイクに差し替えるので、ここに来るchatはjudgeの採点だけ。"""
+    """Answering is faked, so the only chat calls reaching this client are judge scoring."""
 
     def __init__(self):
         self.models: list[str | None] = []
@@ -129,7 +128,7 @@ _QA = [
 
 def test_run_eval_baseline_counts_llm_calls_but_not_judge(monkeypatch):
     def fake_search(client, question, *, top_k=None, rewrite_query=None):
-        client.chat("rerank", "x")  # 検索内のLLM呼び出し（リランキング）の代わり
+        client.chat("rerank", "x")  # stands in for the rerank LLM call inside search
         return [_scored("RPT-001")]
 
     def fake_answer(client, question, chunks):
@@ -144,7 +143,7 @@ def test_run_eval_baseline_counts_llm_calls_but_not_judge(monkeypatch):
 
     assert result.hit and result.cited_gold
     assert result.attempts == 1
-    assert result.llm_calls == 2  # 検索1回＋回答1回。judgeの採点は数えない
+    assert result.llm_calls == 2  # search + answer; judge scoring isn't counted
     assert result.judge_score == 4
     assert judge.models[-1] == "judge-32b"
 
@@ -258,13 +257,13 @@ def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
     from silo_rag.langchain_adapter import LangChainAgentResult
 
     def fake_run(client, question, *, top_k=None, max_searches=None):
-        client.chat("rerank", "x")  # 検索内のリランキング（LLMClient経由。countingに数えられる）
+        client.chat("rerank", "x")  # rerank goes through LLMClient, so it is counted
         return LangChainAgentResult(
             answer=Answer(text="RPT-001を参考に", citations=[]),
             scored_chunks=[_scored("RPT-009"), _scored("RPT-001")],
             searches=2,
             requested_searches=2,
-            llm_calls=3,  # エージェント自身の判断。countingを通らないので、別に足される
+            llm_calls=3,  # the agent's own calls bypass counting, so they're added separately
         )
 
     monkeypatch.setattr(adapter, "run_langchain_agent", fake_run)
@@ -272,7 +271,7 @@ def test_run_eval_langchain_adds_agent_llm_calls_and_uses_searches(monkeypatch):
     (result,) = run_eval(_JudgeClient(), _QA, pipeline="langchain")
 
     assert result.attempts == 2
-    assert result.llm_calls == 4  # リランキング1回＋エージェント3回
+    assert result.llm_calls == 4  # 1 rerank + 3 agent calls
     assert result.retrieved_report_ids == ["RPT-009", "RPT-001"]
     assert result.cited_gold
 
@@ -360,7 +359,7 @@ def test_positive_int_accepts_one_and_up():
 
 
 def test_resolve_max_attempts_uses_the_request_even_when_it_differs_from_config():
-    # 指定した値は、設定の値に関係なく、そのまま使う（`requested or configured`だと、偽の値が設定に化ける）。
+    # Use the requested value as is; `requested or configured` would let a falsy value fall back to config.
     assert _resolve_max_attempts("agent", 2, configured=1) == 2
     assert _resolve_max_attempts("langchain", 2, configured=1) == 2
 
@@ -368,7 +367,7 @@ def test_resolve_max_attempts_uses_the_request_even_when_it_differs_from_config(
 def test_resolve_max_attempts_falls_back_only_when_not_requested():
     assert _resolve_max_attempts("agent", None, configured=1) == 1
     assert _resolve_max_attempts("agent", None, configured=3) == 3
-    # LangChain既製エージェントは、Gの設定ではなく、自分の既定（3回）を使う。
+    # The LangChain agent uses its own default (3), not node G's setting.
     assert _resolve_max_attempts("langchain", None, configured=1) == 3
     assert _resolve_max_attempts("baseline", None, configured=1) is None
     assert _resolve_max_attempts("baseline", 5, configured=1) is None
@@ -385,8 +384,8 @@ def test_default_result_names_differ_by_every_setting():
         _default_result_name("langchain", None, None, 2),
         _default_result_name("langchain", None, None, 3),
     }
-    assert len(names) == 8  # どれも違う名前（上限だけが違う実行も、上書きし合わない）
-    # 書き直しをオンにしたbaselineは、通常のbaselineの結果ファイルを上書きしない
+    assert len(names) == 8  # all distinct, so runs differing only in the cap don't overwrite each other
+    # A rewrite-query baseline must not overwrite the plain baseline's results file
     assert _default_result_name("baseline", None, None, None) == "eval_results.json"
 
 

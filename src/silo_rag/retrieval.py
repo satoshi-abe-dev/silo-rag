@@ -1,17 +1,12 @@
-"""ハイブリッド検索 + LLMリランキング（DAGノードC）。
+"""Node C: hybrid retrieval (BM25 + vectors) with LLM reranking.
 
-BM25（キーワード検索）とベクトル類似度検索をそれぞれ独立に走らせ、正規化したスコアを
-`config.retrieval.vector_weight` で重み付け合成して候補集合を作る。その後、候補を
-LM Studio経由のチャットモデルにリランキングさせて最終順位を決める。
+Normalized BM25 and vector scores are blended by `config.retrieval.vector_weight`,
+then the chat model reranks the candidates.
 
-cross-encoderやsentence-transformers等の追加重量級依存は使わない（「ローカルLLM1本
-（LM Studio）で完結させる」という本プロジェクトの方針のため）。同様に、形態素解析器
-（mecab/janome/sudachi等）も使わず、依存なしの簡易トークナイザ（文字2-gram + ASCII語）
-でBM25を成立させる。
-
-データ規模がポートフォリオ相当（数十〜数百チャンク）であることを前提に、BM25インデックス
-は`search()`呼び出しのたびにChromaDBコレクションから読み直して作り直す（永続化・キャッシュ
-は行わない）。
+No cross-encoder or morphological analyzer: everything runs on the single local LLM
+(LM Studio), and BM25 uses a dependency-free tokenizer (character bigrams + ASCII words).
+The BM25 index is rebuilt from ChromaDB on every `search()` call; fine for a corpus of
+tens to hundreds of chunks.
 """
 
 from __future__ import annotations
@@ -24,20 +19,18 @@ from .config import CHROMA_DIR, COLLECTION_NAME, load_config
 from .ingest import Chunk
 from .llm_client import LLMClient, LLMConnectionError
 
-# --- トークナイザ ------------------------------------------------------------
+# --- Tokenizer ---------------------------------------------------------------
 
-# ASCII英数字（型番・英単語など）は連続した塊をそのまま1トークンとして扱う。
+# A run of ASCII alphanumerics (model numbers, English words) is one token.
 _ASCII_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def tokenize(text: str) -> list[str]:
-    """形態素解析なしの簡易トークナイザ。
+    """Tokenize without a morphological analyzer.
 
-    - ASCII英数字の連続（型番・英単語等）はそのまま1トークンにする。
-    - それ以外（漢字・かな・記号等）の連続範囲は文字2-gramに分解する。
-      形態素解析器に依存しないための実用的な妥協。単語境界を厳密には捉えないが、
-      クエリ側にも同じ関数を通すためBM25の一致判定としては十分機能する。
-    - 空白はトークンの区切りとしてのみ使い、トークン自体には含めない。
+    ASCII alphanumeric runs become single lowercase tokens; other non-space runs
+    (kanji, kana, symbols) become character bigrams. Word boundaries are approximate,
+    but queries go through the same function, so BM25 matching still works.
     """
     tokens: list[str] = []
     i = 0
@@ -53,7 +46,6 @@ def tokenize(text: str) -> list[str]:
         if ch.isspace():
             i += 1
             continue
-        # 非ASCII・非空白の連続範囲（漢字・かな・カナ・全角記号など）をまとめて2-gram化する。
         j = i
         while j < n and not text[j].isspace() and not (text[j].isascii() and text[j].isalnum()):
             j += 1
@@ -66,13 +58,13 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
-# --- 公開インターフェース -----------------------------------------------------
+# --- Public interface ----------------------------------------------------------
 
 
 @dataclass
 class ScoredChunk:
     chunk: Chunk
-    score: float  # 正規化後の統合スコア（高いほど関連度が高い）
+    score: float  # combined normalized score; higher is more relevant
 
 
 def search(
@@ -84,16 +76,16 @@ def search(
     history: list[tuple[str, str]] | None = None,
     rewrite_query: bool | None = None,
 ) -> list[ScoredChunk]:
-    """ハイブリッド検索（BM25＋ベクトル）→ スコア統合 → LLMリランキングを行う。
+    """Run hybrid search (BM25 + vectors), blend the scores, then rerank with the LLM.
 
-    top_k: 最終的に返す件数。Noneならconfig.retrieval.top_k_finalを使う。
-    filters: メタデータの完全一致フィルタ（例: {"dept": "マーケティング部"}）。複数キー指定時はAND条件。
-    history: 直前までの会話（質問, 回答本文）のリスト。指定すると、検索前にqueryを
-        履歴込みで独立した検索クエリに書き換える（フォローアップ質問での検索精度向上のため）。
-    rewrite_query: Trueなら、検索前に、質問からLLMが検索に向いたクエリを作り（plan_query）、そのクエリで
-        BM25・ベクトル検索・並べ直しを行う（名乗りや依頼の言い回しを除く）。履歴があれば、指示語の解決も
-        同じ呼び出しで行う。作成に失敗したら、従来どおりの書き換え（履歴があるときだけ）に戻る。
-        Noneならconfig.retrieval.rewrite_query（既定False）を使う。
+    top_k: number of results; defaults to config.retrieval.top_k_final.
+    filters: exact-match metadata filters, ANDed (e.g. {"dept": "..."}).
+    history: prior (question, answer) turns; if given, the query is rewritten into a
+        standalone one so follow-up questions retrieve well.
+    rewrite_query: if True, have the LLM turn the question into a search query first
+        (plan_query), dropping self-introductions and request phrasing and resolving
+        references from history. Falls back to the history rewrite on failure.
+        Defaults to config.retrieval.rewrite_query.
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
@@ -119,29 +111,23 @@ def search(
 
     where = _build_where(filters)
 
-    # BM25側はfilters適用後のコレクション全件をcollection.get()で取得するため、ここが0件なら
-    # 「（フィルタ後の）対象コーパスが空」を意味する。ベクトル検索をしても結果は必ず0件になる
-    # ため、無駄な埋め込みリクエスト（LM Studioへの依存）を発生させずに早期returnする。
+    # BM25 scans the whole filtered collection, so no hits means an empty corpus;
+    # return early and skip the pointless embedding request.
     bm25_scores, bm25_chunks = _bm25_search(collection, query, top_k_candidates, where)
     if not bm25_chunks:
         return []
 
     if vector_weight <= 0.0:
-        # config.retrieval.vector_weight=0.0は「BM25のみ」を意味する設定。この場合は
-        # 埋め込みモデルへの依存自体を発生させないよう、ベクトル検索を呼び出さない
-        # （呼ぶと埋め込みモデル未ロード時にBM25のみのモードまで失敗してしまう）。
+        # BM25-only mode: skip vector search so it works even without an embedding model loaded.
         vector_scores: dict[str, float] = {}
         vector_chunks: dict[str, Chunk] = {}
     else:
         vector_scores, vector_chunks = _vector_search(collection, client, query, top_k_candidates, where)
 
     if vector_weight >= 1.0:
-        # ベクトルのみを意味する設定。ここでbm25_chunksを候補集合に混ぜると、ベクトル側に
-        # 出てこないBM25専用候補が「v=0（不在）」のままベクトル最下位候補（min-max正規化で
-        # 同じく0点になりうる）と同点になり、安定ソート＋件数制限のときにbm25_chunksが
-        # 挿入順で先に来るぶん本来のベクトル候補を押し出してしまうことがある。ベクトルのみの
-        # 意図を守るため、候補集合はベクトル結果だけに絞る（bm25_scoresは
-        # 「対象コーパスが空か」の判定にのみ使い、スコア統合には使わない）。
+        # Vector-only mode: use only vector candidates. BM25-only candidates (v=0) would tie
+        # with the lowest vector hit (also 0 after min-max) and, coming first in insertion
+        # order, could push real vector results out of the cutoff.
         chunk_map: dict[str, Chunk] = dict(vector_chunks)
         bm25_scores = {}
     else:
@@ -152,7 +138,7 @@ def search(
 
     combined: list[tuple[str, float]] = []
     for chunk_id in chunk_map:
-        # 片方の候補集合にしか出てこないチャンクは、出ていない側のスコアを0として扱う。
+        # A chunk missing from one side scores 0 on that side.
         b = bm25_norm.get(chunk_id, 0.0)
         v = vector_norm.get(chunk_id, 0.0)
         score = (1 - vector_weight) * b + vector_weight * v
@@ -165,7 +151,7 @@ def search(
     return reranked[:resolved_top_k]
 
 
-# --- 会話履歴を踏まえたクエリ書き換え -------------------------------------------
+# --- History-aware query rewrite ------------------------------------------------
 
 _MAX_HISTORY_TURNS = 3
 _HISTORY_ANSWER_TRUNCATE = 200
@@ -191,14 +177,11 @@ def _build_query_rewrite_prompt(question: str, history: list[tuple[str, str]]) -
 
 
 def _resolve_query(client: LLMClient, question: str, history: list[tuple[str, str]]) -> str:
-    """会話履歴を踏まえて、質問を検索エンジンにかけられる独立したクエリに書き換える。
+    """Rewrite a follow-up question into a standalone search query using the history.
 
-    「それについてもう少し詳しく」のような指示語頼みの質問は、そのままBM25/ベクトル検索に
-    かけても検索語が乏しく空振りする。LLMに履歴込みで読ませ、履歴が無くても意味が通る
-    検索クエリに書き換えさせる（rerankと同じ理由でtemperature=0.0にし、書き換えのブレを抑える）。
-
-    LLM呼び出しに失敗した場合は書き換えを諦め、元の質問文をそのまま返す
-    （検索自体は動かしたいので、ここでの失敗によって検索全体を止めない）。
+    Questions like "tell me more about that" have too few search terms on their own.
+    Uses temperature 0 for stable output. On LLM failure, returns the original question
+    so search still runs.
     """
     if not history:
         return question
@@ -210,11 +193,11 @@ def _resolve_query(client: LLMClient, question: str, history: list[tuple[str, st
     return rewritten.strip() or question
 
 
-# --- 検索クエリの作成（質問から、検索に向いたクエリを作る） -----------------------------
+# --- Query planning (turn a question into a search query) ----------------------
 
 
 def build_history_lines(history: list[tuple[str, str]] | None) -> list[str]:
-    """会話履歴を、プロンプトに埋め込む行のリストにする（直近の数往復だけ。履歴が無ければ空）。"""
+    """Format the last few history turns as prompt lines (empty if no history)."""
     if not history:
         return []
     lines = ["会話履歴（指示語の解決にのみ使う）:"]
@@ -243,7 +226,7 @@ def build_plan_prompt(question: str, history: list[tuple[str, str]] | None) -> s
 
 
 def parse_query_response(raw: str) -> str | None:
-    """最初の空でない行を、前後の引用符を除いてクエリとして取り出す。空ならNone。"""
+    """Return the first non-empty line with surrounding quotes stripped, or None."""
     for line in raw.splitlines():
         query = line.strip().strip("「」\"'").strip()
         if query:
@@ -254,11 +237,10 @@ def parse_query_response(raw: str) -> str | None:
 def plan_query(
     client: LLMClient, question: str, history: list[tuple[str, str]] | None = None
 ) -> tuple[str | None, str | None]:
-    """質問から、検索に向いたクエリをLLMに作らせる。(クエリ, 失敗の理由)を返す。
+    """Have the LLM turn a question into a search query; returns (query, failure_reason).
 
-    質問文には、名乗りや依頼の言い回しなど、検索に関係の無い言葉が多く混ざり、BM25（文字2-gram）が
-    散りやすい。成功すれば(クエリ, None)、失敗（LLM呼び出しの失敗・応答が空）なら(None, 理由)を返す。
-    失敗しても例外にはしない（呼び出し側が、質問のまま検索に戻れるように）。
+    Self-introductions and request phrasing in questions scatter BM25 bigram matches.
+    Never raises: returns (None, reason) on failure so callers can search with the raw question.
     """
     prompt = build_plan_prompt(question, history)
     try:
@@ -271,14 +253,13 @@ def plan_query(
     return query, None
 
 
-# --- BM25候補検索 -------------------------------------------------------------
+# --- BM25 candidates -----------------------------------------------------------
 
 
 def _build_where(filters: dict[str, str] | None) -> dict | None:
-    """filtersをChromaDBのwhere句に変換する。
+    """Convert filters to a ChromaDB where clause.
 
-    ChromaDBのwhere句は複数キーを単純な辞書として渡すことを許さないバージョンがあるため、
-    2キー以上のときは明示的に$andでまとめる。
+    Some ChromaDB versions reject multi-key dicts, so multiple keys are wrapped in $and.
     """
     if not filters:
         return None
@@ -288,7 +269,7 @@ def _build_where(filters: dict[str, str] | None) -> dict | None:
 
 
 def _clean_metadata(raw: dict | None) -> dict[str, str]:
-    """ChromaDBから返るメタデータ（値の型が緩い）をdict[str, str]に揃える。"""
+    """Coerce loosely typed ChromaDB metadata to dict[str, str]."""
     return {k: str(v) for k, v in (raw or {}).items()}
 
 
@@ -298,13 +279,10 @@ def _bm25_search(
     top_n: int,
     where: dict | None,
 ) -> tuple[dict[str, float], dict[str, Chunk]]:
-    """コレクション（filters適用後）全件に対してBM25を計算し、上位top_n件を返す。"""
-    # BM25Okapiではなく意図的にBM25Plusを使う。BM25Okapiは「半数以上の文書に出現する語」の
-    # IDFが負になり得て、その際のフロア処理（epsilon * average_idf）もコーパスが小さいと
-    # 平均IDF自体が負に転ぶため負のままになりうる。結果、マッチした文書がノーマッチの文書
-    # （スコア0）より下位に沈むという転倒が起こる。本プロジェクトの想定コーパス（数十〜数百
-    # チャンク、部署フィルタでさらに小さくなる）や文字2-gramトークナイザ（頻出2-gramが半数
-    # 以上の文書に出現しやすい）では現実的に起こりうるため、IDFが常に正であるBM25Plusを使う。
+    """Score every chunk in the filtered collection with BM25 and return the top_n."""
+    # BM25Plus, not BM25Okapi: Okapi's IDF goes negative for terms in over half the documents,
+    # and on a small corpus its epsilon * average_idf floor can stay negative too, ranking
+    # matches below non-matches. Small filtered corpora and common bigrams make this realistic.
     from rank_bm25 import BM25Plus
 
     got = collection.get(where=where, include=["documents", "metadatas"])
@@ -327,7 +305,7 @@ def _bm25_search(
     return scores, chunk_map
 
 
-# --- ベクトル候補検索 ----------------------------------------------------------
+# --- Vector candidates ---------------------------------------------------------
 
 
 def _vector_search(
@@ -337,7 +315,7 @@ def _vector_search(
     top_n: int,
     where: dict | None,
 ) -> tuple[dict[str, float], dict[str, Chunk]]:
-    """クエリを埋め込み、ChromaDBのベクトル類似度検索で上位top_n件を返す。"""
+    """Embed the query and return the top_n ChromaDB vector matches."""
     embeddings = client.embed([query])
     if not embeddings:
         return {}, {}
@@ -355,7 +333,7 @@ def _vector_search(
     metadatas: list[dict] = (result.get("metadatas") or [[]])[0]
     distances: list[float] = (result.get("distances") or [[]])[0]
 
-    # 距離は小さいほど類似（=関連度が高い）なので符号を反転し、「大きいほど良い」に揃える。
+    # Negate distances so higher means more relevant.
     scores = {chunk_id: -float(dist) for chunk_id, dist in zip(ids, distances, strict=True)}
     chunk_map = {
         chunk_id: Chunk(chunk_id=chunk_id, text=documents[i] or "", metadata=_clean_metadata(metadatas[i]))
@@ -364,11 +342,11 @@ def _vector_search(
     return scores, chunk_map
 
 
-# --- スコア正規化 --------------------------------------------------------------
+# --- Score normalization -------------------------------------------------------
 
 
 def _normalize_minmax(scores: dict[str, float]) -> dict[str, float]:
-    """min-max正規化で[0,1]に写像する。全件同値なら1.0（＝差がない＝等しく採用）とする。"""
+    """Min-max normalize to [0, 1]; if all values are equal, every score becomes 1.0."""
     if not scores:
         return {}
     values = list(scores.values())
@@ -379,12 +357,9 @@ def _normalize_minmax(scores: dict[str, float]) -> dict[str, float]:
 
 
 def _normalize_bm25(scores: dict[str, float]) -> dict[str, float]:
-    """BM25スコア用の正規化。
+    """Normalize BM25 scores, keeping all zeros when nothing matched.
 
-    BM25スコアは0以上で「0=一致なし」という意味を持つため、通常のmin-max正規化を
-    そのまま使うと「候補全員が0点（＝誰もキーワードにヒットしていない）」場合に
-    全員を1.0（最高評価）へ底上げしてしまう。それを避け、最大値が0以下（＝ヒットなし）
-    のときは全員0.0のままにする。
+    Plain min-max would lift an all-zero (no keyword hit) set to 1.0.
     """
     if not scores:
         return {}
@@ -395,7 +370,7 @@ def _normalize_bm25(scores: dict[str, float]) -> dict[str, float]:
     return _normalize_minmax(scores)
 
 
-# --- LLMリランキング -----------------------------------------------------------
+# --- LLM reranking -------------------------------------------------------------
 
 _RERANK_TEXT_TRUNCATE = 300
 
@@ -426,10 +401,10 @@ def _build_rerank_prompt(query: str, candidates: list[ScoredChunk]) -> str:
 
 
 def _parse_rerank_response(raw: str, n_candidates: int) -> list[int] | None:
-    """モデル応答から候補番号のJSON配列を抜き出す。
+    """Extract the JSON array of candidate numbers from the model response.
 
-    失敗時（配列が見つからない・JSONとして壊れている・使える番号が1つもない）はNoneを返す。
-    呼び出し側はこれを「意図的なフォールバック」の合図として使い、統合スコア順にフォールバックする。
+    Returns None if no array is found, the JSON is broken, or no number is usable;
+    the caller then falls back to the blended-score order.
     """
     match = re.search(r"\[[^\[\]]*\]", raw, re.DOTALL)
     if match is None:
@@ -455,7 +430,7 @@ def _parse_rerank_response(raw: str, n_candidates: int) -> list[int] | None:
 
 
 def _llm_rerank(client: LLMClient, query: str, candidates: list[ScoredChunk]) -> list[ScoredChunk]:
-    """候補チャンクをLLMにリランキングさせる。失敗時は統合スコア順にフォールバックする。"""
+    """Rerank candidates with the LLM, falling back to blended-score order on failure."""
     if not candidates:
         return []
 
@@ -463,28 +438,25 @@ def _llm_rerank(client: LLMClient, query: str, candidates: list[ScoredChunk]) ->
     try:
         raw = client.chat(_RERANK_SYSTEM_PROMPT, prompt, temperature=0.0)
     except LLMConnectionError:
-        # LLM呼び出し自体の失敗（サーバー未起動・タイムアウト等）。検索結果自体は返したいので、
-        # リランキング前の統合スコア順にフォールバックする（意図的な代替パス。黙って例外を
-        # 握りつぶしているわけではなく、LLMConnectionErrorのみを明示的に捕捉している）。
+        # Intentional fallback: still return results in blended-score order.
+        # Only LLMConnectionError is caught.
         return candidates
 
     order = _parse_rerank_response(raw, len(candidates))
     if order is None:
-        # JSON配列の抽出・解釈に失敗した場合の意図的なフォールバック。上と同様。
+        # Unparseable response: same intentional fallback.
         return candidates
 
     reranked = [candidates[i - 1] for i in order]
-    # モデルが一部の番号しか返さなかった場合、漏れた候補を元の順序のまま末尾に補う
-    # （黙って取りこぼさない）。
+    # Append any candidates the model omitted, in original order, so none are dropped.
     included = set(order)
     reranked.extend(scored for i, scored in enumerate(candidates, start=1) if i not in included)
     return reranked
 
 
 def rerank(client: LLMClient, query: str, candidates: list[ScoredChunk]) -> list[ScoredChunk]:
-    """候補チャンクを、queryへの関連度順にLLMで並べ替える（search()内のリランキングと同じ処理）。
+    """Rerank candidates gathered outside search() (e.g. merged results in agent.py).
 
-    search()の外で集めた候補（例: agent.pyが複数回の検索結果を合わせたもの）を、
-    元の質問で並べ直すための公開関数。失敗時は入力の順序のまま返す。
+    Same reranking as search(); returns the input order on failure.
     """
     return _llm_rerank(client, query, candidates)

@@ -1,36 +1,27 @@
-"""検索を繰り返すRAGエージェント（DAGノードG、LangGraph）。
+"""Node G: iterative-retrieval RAG agent (LangGraph).
 
-retrieval.pyの`search()`（ノードC）とgeneration.pyの`answer_question()`（ノードD）を
-公開関数として呼ぶだけで、C・Dの中身には手を入れない。C・Dは互いに依存しないまま、
-両方を知っているのはこのモジュールだけ（evalがC・Dを両方呼ぶのと同じ形）なので、
-モジュール間の依存関係はDAGのまま保たれる。ループはこのノードの内側（実行時の処理の流れ）にだけある。
+Calls search() (node C) and answer_question() (node D) only through their public functions,
+so C and D stay independent and the module graph remains a DAG; the loop exists only at runtime.
 
-実行時のグラフ:
+Runtime graph:
 
-    START → retrieve → grade ─(十分、または不十分でも上限到達)→ select → generate → END
-               ↑         └─(不十分・上限未満)→ rewrite ─(書き直し失敗)→ select
-               └──────────(新しいクエリ)──────────┘
+    START → retrieve → grade ─(sufficient, or attempt limit reached)→ select → generate → END
+               ↑         └─(insufficient, under limit)→ rewrite ─(rewrite failed)→ select
+               └──────────(new query)──────────┘
 
-first_query="rewrite" のときは、START直後にplanノードが質問から検索クエリを作ってから検索する
-（"raw"なら質問をそのまま検索に使う）。
+With first_query="rewrite", a plan node builds the first query from the question; "raw" searches
+with the question as-is. select re-ranks the whole pool against the original question only after
+multiple searches (a single search() already re-ranks).
 
-selectは、複数回検索した場合だけ、集めた候補全体を元の質問でLLMに並べ直させる
-（retrieval.rerank()。1回だけならsearch()内で並べ直し済みなので何もしない）。
+The LLM decides sufficiency and the next query; code caps the loop (config.agent.max_attempts).
+Tool calling is unreliable on ~7B local models, so this is not a free-form ReAct agent: the LLM
+answers in fixed formats (one word / one query) that code parses strictly.
 
-「根拠が十分か」「次にどんなクエリで探すか」はLLMが判断し、「何回まで繰り返すか」は
-config.agent.max_attemptsでコードが決める。
+Failures in the auxiliary grade/rewrite steps never stop the run; we fall through to answering with
+the chunks at hand. Failures in answer_question itself propagate to the caller.
 
-7B程度のローカルモデルではツール呼び出し（function calling）が安定しないため、
-ReAct型の自由なエージェントにはしない。LLMには「SUFFICIENT／INSUFFICIENTの1語」
-「検索クエリ1文」のように決まった形式だけを答えさせ、コード側で厳密に解釈する
-（eval.pyの_judge_answerと同じ考え方）。
-
-失敗時の方針: 判定・書き直しという補助的なLLM判断の失敗（接続失敗・形式の崩れ）では
-処理を止めず、手元のチャンクで回答生成に進む（retrieval.pyの_resolve_query/_llm_rerankと
-同じ方針）。回答生成そのもの（answer_question）の失敗は、従来どおり呼び出し元に伝える。
-
-LangGraphは、LangSmith用の環境変数（LANGSMITH_TRACING等）を設定しない限り外部へ何も送信しない。
-LLMの呼び出しはすべて既存のLLMClient経由（ローカルのLM Studio等）で、外部送信ゼロの方針は変わらない。
+LangGraph sends nothing externally unless LangSmith env vars (LANGSMITH_TRACING etc.) are set,
+and all LLM calls go through the local LLMClient.
 """
 
 from __future__ import annotations
@@ -45,7 +36,7 @@ from .generation import Answer, answer_question
 from .llm_client import LLMClient, LLMConnectionError
 from .retrieval import ScoredChunk, build_history_lines, parse_query_response, plan_query, rerank, search
 
-# 判定プロンプトに載せるチャンク本文の最大文字数（判定には要点が分かれば足りる）。
+# Max chunk chars shown to the grader; the gist is enough to judge.
 _GRADE_CHUNK_TRUNCATE = 300
 
 
@@ -53,39 +44,34 @@ class AgentState(TypedDict):
     question: str
     history: list[tuple[str, str]] | None
     filters: dict[str, str] | None
-    tried_queries: list[str]  # 同じクエリでの再検索を防ぐ
-    results_by_attempt: list[list[ScoredChunk]]  # 各回の検索結果（新しい回が先頭）
-    scored_chunks: list[ScoredChunk]  # results_by_attemptを_merge_chunksで1列に並べたもの
+    tried_queries: list[str]  # prevents re-running the same query
+    results_by_attempt: list[list[ScoredChunk]]  # newest attempt first
+    scored_chunks: list[ScoredChunk]  # results_by_attempt flattened by _merge_chunks
     attempts: int
     verdict: Literal["sufficient", "insufficient"] | None
     next_query: str | None
     answer: Answer | None
-    trace: list[str]  # UI・evalで「エージェントが何をしたか」を見せるためのログ
+    trace: list[str]  # shows what the agent did, for the UI and eval
 
 
 @dataclass
 class AgentResult:
     answer: Answer
-    scored_chunks: list[ScoredChunk]  # 回答生成に渡したチャンク（関連度順）
+    scored_chunks: list[ScoredChunk]  # chunks passed to generation, by relevance
     tried_queries: list[str]
     attempts: int
     trace: list[str]
 
 
-# --- 検索結果の蓄積 -------------------------------------------------------------
+# --- Accumulating results -------------------------------------------------------
 
 
 def _merge_chunks(results_by_attempt: list[list[ScoredChunk]]) -> list[ScoredChunk]:
-    """各回の検索結果を、順位ごとに交互に並べて1列にする（重複は先に出た方だけ残す）。
+    """Interleave attempts rank by rank (newest first within a rank), keeping the first duplicate.
 
-    results_by_attemptは新しい回が先頭。各回の1位→各回の2位→…の順に並べ、同じ順位の中では
-    新しい回を優先する（再検索するのは「前回までの結果では不十分」と判定されたときだけのため）。
-
-    最新の結果を単純に先頭へ積むと、最新の回がtop_k件を返した時点で前回までの根拠がすべて
-    押し出され、複数回の検索で補い合う根拠を蓄積できない（codexレビューで指摘され、修正した）。
-    交互に並べれば、どの回の上位の根拠も残る。
-    スコアで混ぜないのは、retrieval.search()のスコアがクエリごとに正規化されていて、
-    別クエリの結果同士では比較できないため（最終順位もLLMリランキングで決まっている）。
+    Simply prepending the latest results would push out all earlier evidence once the latest attempt
+    returns top_k hits; interleaving keeps every attempt's top hits. Scores aren't used because
+    search() normalizes them per query, so they aren't comparable across queries.
     """
     merged: list[ScoredChunk] = []
     seen: set[str] = set()
@@ -102,7 +88,7 @@ def _merge_chunks(results_by_attempt: list[list[ScoredChunk]]) -> list[ScoredChu
     return merged
 
 
-# --- 判定（根拠は十分か） ---------------------------------------------------------
+# --- Grading (is the evidence sufficient?) ---------------------------------------
 
 _GRADE_PROMPT_HEAD = (
     "あなたは社内ナレッジ検索の検索結果を点検する係です。"
@@ -111,12 +97,11 @@ _GRADE_PROMPT_HEAD = (
 )
 _GRADE_PROMPT_TAIL = "出力は SUFFICIENT か INSUFFICIENT のどちらか1語のみとし、説明は一切含めないでください。"
 
-# 判定の厳しさ（config.agent.grade_mode）。実データ（7Bモデル）では、どちらにも弱点があった:
-#   strict:  9回中8回が「不十分」。ほぼ毎回上限まで再検索し、時間は約2倍・LLM呼び出しは4〜5倍。
-#            代わりに、baselineでは拾えない正解を再検索で拾えることがある。
-#   lenient: すぐ「十分」と判定するため、多くの質問でbaselineと同じ結果になる。
-# 判定するLLMは「まだ見ていない、もっと良い資料があるか」を知りようがないため、どちらが良いかは
-# プロンプトの言い回しだけでは決まらない。eval.pyで両方を計測して比較する。
+# Grading strictness (config.agent.grade_mode). Both had drawbacks on real data with a 7B model:
+#   strict:  8 of 9 "insufficient"; nearly always hits the limit (~2x time, 4-5x LLM calls),
+#            but sometimes finds answers the baseline misses.
+#   lenient: says "sufficient" quickly, so often matches the baseline.
+# The grader can't know about better unseen documents, so compare both with eval.py.
 _GRADE_SYSTEM_PROMPTS: dict[str, str] = {
     "strict": (
         _GRADE_PROMPT_HEAD
@@ -138,8 +123,7 @@ FIRST_QUERY_MODES = ("raw", "rewrite")
 def _build_grade_prompt(
     question: str, chunks: list[ScoredChunk], history: list[tuple[str, str]] | None = None
 ) -> str:
-    # フォローアップ質問（「その費用は？」等）は、履歴が無いと何についての質問か判定できない
-    # （codexレビューで指摘され、修正した。検索・書き直し・回答生成と同じく履歴を渡す）。
+    # Follow-up questions can't be graded without history, so pass it like the other steps do.
     lines = [*build_history_lines(history), f"質問: {question}", "", "検索で見つかった資料の抜粋:"]
     for i, sc in enumerate(chunks, start=1):
         meta = sc.chunk.metadata
@@ -157,10 +141,10 @@ def _build_grade_prompt(
 
 
 def _parse_grade_response(raw: str) -> Literal["sufficient", "insufficient"] | None:
-    """応答が「SUFFICIENT／INSUFFICIENTの1語ちょうど」の場合だけ解釈する。
+    """Parse only an exact SUFFICIENT/INSUFFICIENT reply; None otherwise.
 
-    部分一致で探すと、"INSUFFICIENT"の中の"SUFFICIENT"を誤って拾ってしまうため、
-    前後の空白・末尾の句点を除いたうえでの完全一致にする。
+    Exact match (after trimming whitespace and a trailing period), since a substring search would
+    find "SUFFICIENT" inside "INSUFFICIENT".
     """
     word = raw.strip().rstrip("。.").strip().upper()
     if word == "SUFFICIENT":
@@ -170,7 +154,7 @@ def _parse_grade_response(raw: str) -> Literal["sufficient", "insufficient"] | N
     return None
 
 
-# --- クエリの書き直し ------------------------------------------------------------
+# --- Query rewriting --------------------------------------------------------------
 
 _REWRITE_SYSTEM_PROMPT = (
     "あなたは社内ナレッジ検索の検索クエリを考える係です。"
@@ -202,17 +186,13 @@ def _normalize_query(query: str) -> str:
 
 
 def _build_rerank_query(question: str, history: list[tuple[str, str]] | None) -> str:
-    """最終選定の並べ直しに使うクエリ。
-
-    retrieval.rerank()は質問文を1つしか受け取れないため、フォローアップ質問（「その費用は？」等）
-    では直前の質問を添えて、何についての質問かが分かるようにする。
-    """
+    """Query for the final re-rank; prepends the previous question so follow-ups make sense."""
     if not history:
         return question
     return f"{history[-1][0]}（に続けて）{question}"
 
 
-# --- グラフ ---------------------------------------------------------------------
+# --- Graph ------------------------------------------------------------------------
 
 
 def build_graph(
@@ -223,11 +203,11 @@ def build_graph(
     grade_mode: str = "lenient",
     first_query: str = "raw",
 ):
-    """エージェントのグラフを組み立てて、コンパイル済みのものを返す。
+    """Build and compile the agent graph.
 
-    clientはクロージャで各ノードに渡す（LLMClientはシリアライズできないため、Stateには入れない）。
-    grade_mode: 判定の厳しさ。"strict" か "lenient"（_GRADE_SYSTEM_PROMPTSのコメント参照）。
-    first_query: 1回目の検索に使うクエリ。"raw"は質問そのまま、"rewrite"は質問からLLMが作ったクエリ。
+    client is captured by closures, not stored in State, because LLMClient isn't serializable.
+    grade_mode: "strict" or "lenient" (see _GRADE_SYSTEM_PROMPTS).
+    first_query: "raw" searches with the question; "rewrite" has the LLM build the first query.
     """
     if grade_mode not in _GRADE_SYSTEM_PROMPTS:
         raise ValueError(f"grade_modeは{GRADE_MODES}のいずれかを指定してください: {grade_mode!r}")
@@ -236,9 +216,8 @@ def build_graph(
     grade_system_prompt = _GRADE_SYSTEM_PROMPTS[grade_mode]
 
     def plan(state: AgentState) -> dict:
-        # 1回目の検索クエリを、質問から作る。質問の文には、名乗りや依頼の言い回しなど検索に関係の無い
-        # 言葉が多く混ざり、BM25（文字2-gram）が散りやすい。失敗したら、質問そのままで検索する
-        # （retrieveがnext_query=Noneを見て従来の初回の動きに戻る）。
+        # Raw questions carry noise (self-introductions, polite phrasing) that scatters character-bigram
+        # BM25. On failure, next_query stays None and retrieve searches with the raw question.
         query, failure = plan_query(client, state["question"], state["history"])
         if query is None:
             return {"trace": [*state["trace"], f"クエリ作成: {failure}。質問のまま検索"]}
@@ -247,8 +226,7 @@ def build_graph(
     def retrieve(state: AgentState) -> dict:
         attempts = state["attempts"] + 1
         if state["next_query"] is None and state["attempts"] == 0:
-            # 質問そのままで検索する。会話履歴があれば、search()側が履歴込みの
-            # 独立したクエリに書き換えてから検索する（従来のbaselineと同じ挙動）。
+            # Same as the baseline: search() folds any history into a standalone query.
             query = state["question"]
             latest = search(
                 client,
@@ -259,7 +237,7 @@ def build_graph(
                 rewrite_query=False,
             )
         else:
-            # planノード・rewriteノードが、履歴も踏まえてクエリを作っているので、historyは渡さない。
+            # plan/rewrite already used the history to build this query.
             query = state["next_query"] or state["question"]
             latest = search(client, query, top_k=top_k, filters=state["filters"], rewrite_query=False)
         results_by_attempt = [latest, *state["results_by_attempt"]]
@@ -274,11 +252,11 @@ def build_graph(
 
     def grade(state: AgentState) -> dict:
         if state["attempts"] >= max_attempts:
-            # もう再検索できないので、判定の結果は何も変えない（どちらでも回答生成に進む）。LLMを呼ばない。
+            # No retries left, so the verdict wouldn't change anything; skip the LLM call.
             return {"verdict": None, "trace": [*state["trace"], "判定: 省略（検索の上限に達したため）"]}
         chunks = state["scored_chunks"][:top_k]
         if not chunks:
-            # 判定するまでもなく根拠が無い。LLMを呼ばずに「不十分」とする。
+            # No evidence at all; insufficient without asking the LLM.
             return {"verdict": "insufficient", "trace": [*state["trace"], "判定: 不十分（検索結果0件）"]}
         prompt = _build_grade_prompt(state["question"], chunks, state["history"])
         try:
@@ -290,7 +268,7 @@ def build_graph(
             }
         verdict = _parse_grade_response(raw)
         if verdict is None:
-            # 形式が崩れた応答で検索を無駄に繰り返させないよう、「十分」とみなして先へ進む。
+            # Treat malformed replies as sufficient so they don't trigger pointless retries.
             return {
                 "verdict": "sufficient",
                 "trace": [*state["trace"], "判定: 応答を解釈できず。十分とみなした"],
@@ -315,7 +293,7 @@ def build_graph(
         if query is None:
             return {"next_query": None, "trace": [*state["trace"], "書き直し: 応答が空。打ち切り"]}
         if _normalize_query(query) in {_normalize_query(q) for q in state["tried_queries"]}:
-            # 同じクエリで検索し直しても結果は変わらない。
+            # Re-running the same query would return the same results.
             return {
                 "next_query": None,
                 "trace": [*state["trace"], f"書き直し: 「{query}」は試行済み。打ち切り"],
@@ -326,13 +304,12 @@ def build_graph(
         return "retrieve" if state["next_query"] else "select"
 
     def select(state: AgentState) -> dict:
-        # 1回しか検索していなければ、search()内ですでに質問で並べ直し済み。
+        # A single search() has already re-ranked against the question.
         if state["attempts"] <= 1:
             return {}
-        # 複数回検索した場合、_merge_chunksの交互の並びのままtop_kで切ると、回数が増えるほど
-        # 各回の上位しか残らず、元の質問での検索（たいてい最も信頼できる）の2位以下が押し出される
-        # （実データで、baselineでは拾えていた正解がこれで落ちた）。集めた候補全体を元の質問で
-        # 並べ直してから、generateでtop_k件に絞る。
+        # Cutting the interleaved list at top_k keeps only each attempt's top hits and drops the
+        # original query's runners-up (this lost answers the baseline found on real data), so
+        # re-rank the whole pool against the original question; generate trims to top_k.
         query = _build_rerank_query(state["question"], state["history"])
         candidates = state["scored_chunks"]
         reranked = rerank(client, query, candidates)
@@ -374,13 +351,12 @@ def run_agent(
     grade_mode: str | None = None,
     first_query: str | None = None,
 ) -> AgentResult:
-    """エージェントを1問ぶん実行する。引数の意味はretrieval.search()・generation.answer_question()と同じ。
+    """Run the agent for one question. Other args match search() and answer_question().
 
-    top_k: 判定・回答生成に使うチャンク数。Noneならconfig.retrieval.top_k_finalを使う。
-    max_attempts: 検索の上限回数（初回を含む）。Noneならconfig.agent.max_attemptsを使う。
-    grade_mode: 判定の厳しさ（"strict"／"lenient"）。Noneならconfig.agent.grade_modeを使う。
-    first_query: 1回目の検索クエリ（"raw"＝質問そのまま／"rewrite"＝質問からLLMが作る）。
-        Noneならconfig.agent.first_queryを使う。
+    top_k: chunks used for grading and answering (default: config.retrieval.top_k_final).
+    max_attempts: max searches, including the first (default: config.agent.max_attempts).
+    grade_mode: "strict" or "lenient" (default: config.agent.grade_mode).
+    first_query: "raw" or "rewrite" (default: config.agent.first_query).
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
@@ -411,9 +387,8 @@ def run_agent(
         "answer": None,
         "trace": [],
     }
-    # 最大ステップ数は plan（rewrite-firstのとき）が1回、retrieve・grade が各max_attempts回、rewriteが
-    # max_attempts-1回、select・generateが各1回で 3*max_attempts+2。max_attemptsでループは必ず止まるが、
-    # 万一の無限ループに備えてLangGraph側のステップ上限も、必要数ぎりぎりで掛けておく。
+    # Max steps: plan 1 + retrieve/grade max_attempts each + rewrite max_attempts-1 + select/generate 1 each
+    # = 3*max_attempts+2. A tight LangGraph recursion limit is a backstop against infinite loops.
     final = app.invoke(initial, config={"recursion_limit": 3 * resolved_max + 3})
     return AgentResult(
         answer=final["answer"],

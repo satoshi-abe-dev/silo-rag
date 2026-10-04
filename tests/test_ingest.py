@@ -1,4 +1,4 @@
-"""ingest（DAGノードB）の純粋ロジックのテスト。ChromaDB・LLMは使わない。"""
+"""Tests for ingest (DAG node B) pure logic; no ChromaDB or LLM."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def test_build_chunks_ids_and_metadata(tmp_path):
         "RPT-001::対象領域・テーマ",
         "RPT-001::推進体制",
     ]
-    # 各チャンクのメタデータには、フロントマターの値 + section が乗っている
+    # Metadata = frontmatter values + section
     for c in chunks:
         assert c.metadata["report_id"] == "RPT-001"
         assert c.metadata["dept"] == "マーケティング部"
@@ -113,7 +113,7 @@ date: 2023-01-01
 
 
 class _FakeVLMClient:
-    """describe_imageだけを持つフェイク。実際のLM Studio接続は使わない。"""
+    """Fake VLM client with only describe_image."""
 
     def __init__(self, caption: str | None = None, raise_error: bool = False):
         self._caption = caption
@@ -133,11 +133,11 @@ def test_build_chunks_reads_sibling_image_and_strips_markdown_syntax(tmp_path):
     report_path.write_text(SAMPLE_REPORT_WITH_IMAGE, encoding="utf-8")
     (tmp_path / "RPT-002.png").write_bytes(b"fake-png-bytes")
 
-    chunks = build_chunks(report_path)  # client=None -> キャプション化しない
+    chunks = build_chunks(report_path)  # client=None -> no captioning
 
     result_chunk = next(c for c in chunks if c.metadata["section"] == RESULT_IMAGE_SECTION)
     assert "[結果画像の説明]" not in result_chunk.text
-    assert "![成果画像]" not in result_chunk.text  # 画像記法は本文チャンクから取り除かれる
+    assert "![成果画像]" not in result_chunk.text  # image markup is stripped from the chunk
     assert "成果の説明文。" in result_chunk.text
 
 
@@ -161,7 +161,7 @@ def test_build_chunks_skips_captioning_when_no_image_present(tmp_path):
     client = _FakeVLMClient(caption="呼ばれないはず")
     build_chunks(report_path, client)
 
-    assert client.calls == 0  # 画像が無いレポートではVLMを呼ばない
+    assert client.calls == 0  # no image, no VLM call
 
 
 def test_caption_image_returns_none_on_llm_connection_error():
@@ -177,10 +177,8 @@ def test_parse_pdf_text_basic():
 
 
 def test_parse_pdf_text_does_not_depend_on_blank_line_separator():
-    """退行テスト: 実際にreportlabで生成したPDFをpypdfで抽出すると、drawStringを
-    呼ばなかった空行がテキストに残らず、メタデータとセクションの区切りの空行が
-    消えることがある（60件中9件のPDFでゼロセクションになる実例が見つかった）。
-    空行の有無に依存しない実装になっていることを確認する。"""
+    """Regression: pypdf drops blank lines from reportlab PDFs, losing the metadata/section
+    separator; 9 of 60 PDFs parsed to zero sections."""
     text = "report_id: RPT-041\ndept: 経営企画部\n## プロジェクト目的\n本文A\n## 成果サマリー\n本文B\n"
     meta, sections = _parse_pdf_text(text)
     assert meta == {"report_id": "RPT-041", "dept": "経営企画部"}
@@ -188,7 +186,6 @@ def test_parse_pdf_text_does_not_depend_on_blank_line_separator():
 
 
 def test_parse_pdf_text_empty_metadata_line_is_harmless():
-    # メタデータ部分に複数の空行が挟まっても問題なく無視される。
     text = "report_id: RPT-001\n\n\ndept: マーケティング部\n## プロジェクト目的\n本文\n"
     meta, sections = _parse_pdf_text(text)
     assert meta == {"report_id": "RPT-001", "dept": "マーケティング部"}

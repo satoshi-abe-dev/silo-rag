@@ -1,5 +1,4 @@
-"""retrieval（DAGノードC）の純粋ロジックのテスト。ChromaDB・LLMは使わない
-（tokenize/スコア正規化/フィルタ変換/リランク応答パースはいずれも外部サービス不要）。"""
+"""Tests for retrieval (DAG node C) logic; no ChromaDB or LLM."""
 
 from __future__ import annotations
 
@@ -30,12 +29,12 @@ def test_tokenize_ascii_kept_whole():
 
 
 def test_tokenize_japanese_uses_bigrams():
-    assert tokenize("解析") == ["解析"]  # 2文字なので1つの2-gram
+    assert tokenize("解析") == ["解析"]  # two chars -> a single bigram
     assert tokenize("解析目的") == ["解析", "析目", "目的"]
 
 
 def test_tokenize_mixed_ascii_and_japanese():
-    # ASCII語（KPI）はそのまま1トークン、続く日本語部分（で確認）はbigram化される。
+    # ASCII words stay whole; the Japanese part is split into bigrams.
     assert tokenize("KPIで確認") == ["kpi", "で確", "確認"]
 
 
@@ -64,7 +63,7 @@ def test_normalize_minmax_empty():
 
 
 def test_normalize_bm25_all_nonpositive_stays_zero():
-    # 全員ヒットなし（BM25スコアが0以下）のとき、min-maxで全員1.0に底上げされてはいけない。
+    # With no hits (all scores <= 0), min-max must not lift everything to 1.0.
     result = _normalize_bm25({"a": 0.0, "b": 0.0})
     assert result == {"a": 0.0, "b": 0.0}
 
@@ -108,7 +107,7 @@ def test_parse_rerank_response_valid_json():
 
 def test_parse_rerank_response_ignores_out_of_range_and_duplicates():
     order = _parse_rerank_response("[3, 3, 99, 0, 1]", 3)
-    assert order == [3, 1]  # 範囲外(99, 0)は無視、重複(3)は1回だけ
+    assert order == [3, 1]  # out of range (99, 0) ignored, duplicate 3 kept once
 
 
 def test_parse_rerank_response_returns_none_on_garbage():
@@ -164,7 +163,7 @@ def test_resolve_query_falls_back_to_original_on_llm_failure():
     assert _resolve_query(client, "元の質問", [("前の質問", "前の回答")]) == "元の質問"
 
 
-# --- 検索クエリの作成（plan_query）と、search()のrewrite_query ----------------------------
+# --- Query planning (plan_query) and search()'s rewrite_query ------------------------------
 
 
 def test_build_plan_prompt_includes_question_and_history():
@@ -192,7 +191,7 @@ def test_plan_query_reports_empty_response():
 
 
 class _EmptyCorpus:
-    """search()が早期に終わるよう、BM25の候補が0件になる偽のChromaDB。使われたクエリを記録する。"""
+    """Records BM25 queries; zero candidates make search() return early."""
 
     def __init__(self):
         self.bm25_queries: list[str] = []
@@ -200,7 +199,7 @@ class _EmptyCorpus:
 
 @pytest.fixture
 def empty_search(monkeypatch):
-    """ChromaDB・埋め込みを使わずに、search()が最初のBM25検索に渡すクエリだけを調べる。"""
+    """Capture the query search() passes to BM25, without ChromaDB or embeddings."""
     import chromadb
 
     corpus = _EmptyCorpus()
@@ -230,7 +229,7 @@ def empty_search(monkeypatch):
 
 
 class _ScriptedClient:
-    """システムプロンプトで、plan・履歴での書き換えの応答を出し分ける。"""
+    """Answers plan or history-rewrite prompts, chosen by the system prompt."""
 
     def __init__(self, plan: str | None = "計画されたクエリ", resolve: str = "履歴で解決したクエリ"):
         self.plan = plan
@@ -288,7 +287,7 @@ def test_search_falls_back_to_history_rewrite_when_planning_fails(empty_search):
 
 
 def test_search_with_history_and_plan_uses_one_llm_call(empty_search):
-    # 履歴の指示語の解決は、planのプロンプトの中で行うので、書き換えのLLM呼び出しは重ねない。
+    # The plan prompt already resolves references to history; no extra rewrite call.
     client = _ScriptedClient()
     search(client, "それは？", history=[("前の質問", "前の回答")], rewrite_query=True)
     assert empty_search.bm25_queries == ["計画されたクエリ"]
