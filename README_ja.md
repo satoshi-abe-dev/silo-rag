@@ -148,21 +148,28 @@ graph TB
         direction LR
         F2["F app<br/>画面"] --> G["G agent<br/>クエリ作成<br/>→ 検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答"]
     end
-    subgraph ev["③ 評価（検索と回答の精度を測るとき）"]
+    subgraph ev["③ 検索と回答の精度を測る ― 通常方式（既定）"]
         direction LR
-        E["E eval<br/>評価"] --> CD["C・D の機能を呼んで<br/>精度を測る"]
-        E -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携<br/>（評価でのみ使う）"] --> CD
+        E1["E eval<br/>評価"] --> CD1["C・D の機能を呼んで<br/>精度を測る"]
+    end
+    subgraph ev2["③ 検索と回答の精度を測る ― G・Hを使う（オプション）"]
+        direction LR
+        E2["E eval<br/>評価"] -->|"--pipeline agent"| G2["G agent<br/>エージェント方式"] --> CD2["C・D の機能を呼んで<br/>精度を測る"]
+        E2 -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携"] --> CD2
     end
     prep ~~~ plain
     plain ~~~ agent
     agent ~~~ ev
+    ev ~~~ ev2
 ```
 
 - **① 準備**: Aが合成レポートを作り、Bが取り込んで、検索用データ（ChromaDB）にする
 - **② 質問から回答を作成**（回答方式は、サイドバーで切り替える）
   - **通常方式**（既定）: Fが、Cの検索の機能（`search`）を呼び、その結果を、Dの回答生成の機能（`answer_question`）に渡す
   - **エージェント方式**（オプション）: Fは、CとDを直接呼ぶ代わりに、Gを呼ぶ。Gは、Cの機能（クエリの作成`plan_query`・検索`search`・並べ直し`rerank`）と、Dの機能（回答の作成`answer_question`）を呼びながら、判定と再検索を行う。初期設定では、検索は1回で、判定と再検索は動かない
-- **③ 評価**: 開発者が、正解の分かっている質問で、検索と回答の精度を測るときに、コマンドで実行する（質問に答える流れの一部ではない）。Eが、Cの検索の機能とDの回答生成の機能を呼んで、測る。`--pipeline langchain`のときだけ、EはHを経由して、C・Dの機能を呼ぶ（Hは画面からは使えない）
+- **③ 検索と回答の精度を測る**（評価）: 開発者が、正解の分かっている質問で、精度を測るときに、コマンドで実行する（質問に答える流れの一部ではない）
+  - **通常方式**（既定）: Eが、Cの検索の機能とDの回答生成の機能を、直接呼んで測る
+  - **G・Hを使う方式**（オプション）: `--pipeline agent`ではGを、`--pipeline langchain`ではHを経由して、Eが、C・Dの機能を呼んで測る。Hは、画面からは使えない（評価のコマンド専用）
 
 オプションのノードG・Hの役割は、次のとおり。
 

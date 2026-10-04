@@ -148,21 +148,28 @@ graph TB
         direction LR
         F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
     end
-    subgraph ev["③ Evaluation (when measuring search and answer accuracy)"]
+    subgraph ev["③ Measure search and answer accuracy: plain mode (default)"]
         direction LR
-        E["E eval<br/>evaluate"] --> CD["calls C's and D's<br/>functions to measure<br/>accuracy"]
-        E -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper<br/>(evaluation only)"] --> CD
+        E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]
+    end
+    subgraph ev2["③ Measure search and answer accuracy: using G or H (optional)"]
+        direction LR
+        E2["E eval<br/>evaluate"] -->|"--pipeline agent"| G2["G agent<br/>agent mode"] --> CD2["calls C's and D's<br/>functions to measure<br/>accuracy"]
+        E2 -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD2
     end
     prep ~~~ plain
     plain ~~~ agent
     agent ~~~ ev
+    ev ~~~ ev2
 ```
 
 - **① Preparation**: A makes the synthetic reports, and B loads them into the search data (ChromaDB)
 - **② Create an answer from the question** (the answer mode is switched in the sidebar)
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run
-- **③ Evaluation**: the developer runs it from the command line, on questions whose correct answers are known, when measuring the accuracy of search and of answers (it is not part of the flow that answers a question). E calls C's search function and D's answer-generation function to measure it. Only with `--pipeline langchain` does E go through H to call the functions of C and D (H cannot be used from the UI)
+- **③ Measure search and answer accuracy** (evaluation): the developer runs it from the command line, on questions whose correct answers are known, when measuring accuracy (it is not part of the flow that answers a question)
+  - **Plain mode** (default): E calls C's search function and D's answer-generation function directly and measures them
+  - **Using G or H** (optional): with `--pipeline agent` E goes through G, and with `--pipeline langchain` through H, to call the functions of C and D. H cannot be used from the UI (it is only for the evaluation command)
 
 The optional nodes G and H, in detail:
 
