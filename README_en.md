@@ -137,7 +137,7 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 
 ## Constraints and scope
 
-- The data is synthetic, so the numbers and cases aren't from real practice. No company names are used
+- **The demo reports (60 of them) are synthetic data made by an LLM.** Their numbers (such as KPIs) and cases do not come from real business, and no real company names appear
 - **The application itself (UI, generated data, LLM prompts) is Japanese-only.** The bilingual README is for portfolio readability, separate from the app's language support
 - **Conversation history is used only to interpret follow-up search questions** (e.g., "tell me more about that"). Meta-questions about the conversation itself ("what did I just say?") are intentionally answered with "no matching case found"
 
