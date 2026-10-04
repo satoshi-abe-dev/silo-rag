@@ -105,8 +105,10 @@ python -m silo_rag.ingest --reports-dir <レポートが入っているディレ
 手順1が終わってから実行する。起動すると、ブラウザにチャット形式の画面が開く（見た目は、[画面](#画面)のスクリーンショットのとおり）。質問は、ここで入力する。ブラウザが開いたままになる、フォアグラウンドのプロセスなので、データの用意とは別に実行する。
 
 ```bash
-streamlit run src/silo_rag/app.py
+streamlit run src/silo_rag/app.py --server.address localhost
 ```
+
+`--server.address localhost`は、このパソコンのブラウザからだけ開けるようにする指定。付けないと、同じネットワークにつながった他の機器からも、画面を開ける状態になる。
 
 ### 手順3（オプション）: エージェント方式を使う
 
