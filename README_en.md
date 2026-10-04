@@ -134,7 +134,7 @@ graph TB
     end
     subgraph agent["② Every question: agent mode (optional)"]
         direction LR
-        F2["F app<br/>UI"] --> G["G agent<br/>write query → search with C → grade<br/>→ search again if needed"] --> D2["D generation<br/>answer"]
+        F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search with C<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
     end
     subgraph ev["③ Evaluation (separate task)"]
         direction LR

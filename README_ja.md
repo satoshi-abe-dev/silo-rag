@@ -134,7 +134,7 @@ graph TB
     end
     subgraph agent["② 質問のたび ― エージェント方式（オプション）"]
         direction LR
-        F2["F app<br/>画面"] --> G["G agent<br/>クエリ作成 → C で検索 → 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答"]
+        F2["F app<br/>画面"] --> G["G agent<br/>クエリ作成<br/>→ C で検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答"]
     end
     subgraph ev["③ 評価（別の作業）"]
         direction LR
