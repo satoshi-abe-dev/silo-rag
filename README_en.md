@@ -160,8 +160,11 @@ The system is made of six **nodes** (units of work; A to F each correspond to on
 %%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}, "themeVariables": {"lineColor": "#57606a"}}}%%
 graph TB
     subgraph g1["① Preparation (at install time, a command, once only)"]
-        direction LR
-        A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
+        direction TB
+        subgraph prep["Demo data (with your own reports, only B runs)"]
+            direction LR
+            A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
+        end
     end
     subgraph g2["② Create an answer from the question (end users, on the screen)"]
         direction TB
@@ -193,6 +196,7 @@ graph TB
     style g1 fill:#e7f0ff,stroke:#3b6fd4,color:#1f2328
     style g2 fill:#e6f6e8,stroke:#2f9e44,color:#1f2328
     style g3 fill:#fff1de,stroke:#d9822b,color:#1f2328
+    style prep fill:#ffffff,stroke:#8c959f,color:#1f2328
     style plain fill:#ffffff,stroke:#8c959f,color:#1f2328
     style agent fill:#ffffff,stroke:#8c959f,color:#1f2328
     style ev fill:#ffffff,stroke:#8c959f,color:#1f2328
