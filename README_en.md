@@ -148,26 +148,41 @@ graph TB
         direction LR
         F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
     end
-    subgraph ev["③ Evaluation (separate task)"]
+    subgraph ev["③ Measure search and answer accuracy: plain mode (default)"]
         direction LR
-        E["E eval<br/>evaluate"] --> CD["calls C's and D's<br/>functions to measure<br/>accuracy"]
-        E -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper<br/>(evaluation only)"] --> CD
+        E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]
+    end
+    subgraph ev2["③ Measure search and answer accuracy: using G or H (optional)"]
+        direction LR
+        E2["E eval<br/>evaluate"] -->|"set on the command line<br/>--pipeline agent"| G2["G agent<br/>agent mode"] --> CD2["calls C's and D's<br/>functions to measure<br/>accuracy"]
+        E2 -->|"set on the command line<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD2
     end
     prep ~~~ plain
     plain ~~~ agent
     agent ~~~ ev
+    ev ~~~ ev2
 ```
 
 - **① Preparation**: A makes the synthetic reports, and B loads them into the search data (ChromaDB)
 - **② Create an answer from the question** (the answer mode is switched in the sidebar)
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run
-- **③ Evaluation**: E calls C's search function and D's answer-generation function to measure retrieval accuracy and answer quality. It is a separate task from answering questions. Only with `--pipeline langchain` does E go through H to call the functions of C and D (H cannot be used from the UI)
+- **③ Measure search and answer accuracy** (evaluation): the developer runs it from the command line, on questions whose correct answers are known, when measuring accuracy (it is not part of the flow that answers a question)
+  - **Plain mode** (default): E calls C's search function and D's answer-generation function directly and measures them
+  - **Using G or H** (optional): E goes through G or H to call the functions of C and D and measures them. How to switch is in the table below
 
-The optional nodes G and H, in detail:
+The optional nodes G and H are switched on like this:
 
-- **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). G is called only when it is selected in E (`--pipeline agent`) or F (the "agent" answer mode)
-- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `build_citations`. H is called only when E is run with `--pipeline langchain`
+| | ② Answering a question (UI) | ③ Measuring accuracy (command) | Install first |
+| --- | --- | --- | --- |
+| Plain mode (default) | "Answer mode" in the sidebar: "plain" | `python -m silo_rag.eval` | nothing |
+| **G** agent mode | "Answer mode" in the sidebar: "agent" | `python -m silo_rag.eval --pipeline agent` | `pip install -e ".[agent]"` |
+| **H** LangChain integration | **not available** (it does not appear in the UI) | `python -m silo_rag.eval --pipeline langchain` | `pip install -e ".[langchain]"` |
+
+What G and H do:
+
+- **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`)
+- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `build_citations`
 - Both are imported only when used. Plain mode works without LangGraph or LangChain installed
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
