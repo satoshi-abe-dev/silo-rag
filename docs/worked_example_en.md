@@ -3,7 +3,7 @@
 [日本語](worked_example_ja.md) | English
 
 This follows a question through each processing step, using **real values**. It helps to read
-[the README's "Terms: BM25 and vector search"](../README_en.md#terms-bm25-and-vector-search) first (BM25 = keyword
+["How the search works" in the architecture details](architecture_en.md#how-the-search-works-bm25-and-vector-search) first (BM25 = keyword
 search; vector search = semantic search).
 
 ## Setup
@@ -11,7 +11,7 @@ search; vector search = semantic search).
 - The data is synthetic (60 dummy in-house project reports).
 - Query writing, reranking, and answer generation use `qwen2.5-7b-instruct`; embeddings use
   `text-embedding-nomic-embed-text-v1.5` (both in LM Studio).
-- **Note**: the two questions followed here (QA-005 and QA-001) belong to the 15-question evaluation, which I was looking at when I designed the search-query writing. The claim that "writing the search query helps" (including the stage-by-stage numbers) comes from those 15 questions; re-measuring plain mode on 45 questions could not confirm an effect of query writing (see the [README](../README_en.md#evaluation)).
+- **Note**: the two questions followed here (QA-005 and QA-001) belong to the 15-question evaluation, which I was looking at when I designed the search-query writing. The claim that "writing the search query helps" (including the stage-by-stage numbers) comes from those 15 questions; re-measuring plain mode on 45 questions could not confirm an effect of query writing (see [the agent mode's evaluation](agent_evaluation_en.md)).
 - The values were taken in October 2026 with throwaway scripts (not included in the repository). They step through the
   inside of `search()` one stage at a time, and the script checked that the result matched the real `search()`.
   **Steps that involve an LLM vary a little from run to run, even at temperature 0** (the query written for the same
