@@ -135,7 +135,7 @@ graph TB
     end
     subgraph agent["② Create an answer from the question (every question): agent mode (optional)"]
         direction LR
-        F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search with C<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
+        F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
     end
     subgraph ev["③ Evaluation (separate task)"]
         direction LR
@@ -148,8 +148,8 @@ graph TB
 
 - **① Preparation**: A makes the synthetic reports, and B loads them into the search data (ChromaDB)
 - **② Create an answer from the question** (runs on every question; the answer mode is switched in the sidebar)
-  - **Plain mode** (default): F calls C (search) and hands the result to D (answer generation)
-  - **Agent mode** (optional): instead of calling C and D directly, F calls G. G writes the query, searches with C, grades, and searches again if needed, then D writes the answer. With the default settings it searches once, so grading and re-search do not run
+  - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
+  - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run
 - **③ Evaluation**: E calls C and D to measure retrieval accuracy and answer quality. It is a separate task from answering questions
 
 The optional nodes G and H, in detail:
