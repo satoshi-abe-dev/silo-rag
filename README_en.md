@@ -150,6 +150,7 @@ graph TB
         A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
     end
     subgraph g2["② Create an answer from the question (end users, on the screen)"]
+        direction TB
         subgraph plain["Plain mode (default)"]
             direction LR
             U1(["User:<br/>types a question,<br/>presses Send"]) --> F1["F app<br/>takes the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer and<br/>cited past cases"])
@@ -161,6 +162,7 @@ graph TB
         plain ~~~ agent
     end
     subgraph g3["③ Measure search and answer accuracy (for developers, a command)"]
+        direction TB
         subgraph ev["Plain mode (default)"]
             direction LR
             E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]

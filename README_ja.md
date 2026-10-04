@@ -150,6 +150,7 @@ graph TB
         A["A datagen<br/>合成レポート"] --> B["B ingest<br/>取り込み"] --> DB[("検索用データ")]
     end
     subgraph g2["② 質問から回答を作成（利用者が、画面で使う）"]
+        direction TB
         subgraph plain["通常方式（既定）"]
             direction LR
             U1(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F1["F app<br/>質問を受け取る"] --> C1["C retrieval<br/>検索"] --> D1["D generation<br/>回答の作成"] --> R1(["画面に表示:<br/>回答と<br/>参照した過去事例"])
@@ -161,6 +162,7 @@ graph TB
         plain ~~~ agent
     end
     subgraph g3["③ 検索と回答の精度を測る（開発用・コマンド）"]
+        direction TB
         subgraph ev["通常方式（既定）"]
             direction LR
             E1["E eval<br/>評価"] --> CD1["C・D の機能を呼んで<br/>精度を測る"]
