@@ -4,7 +4,15 @@
 
 **A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.** Built as a portfolio project.
 
-> 🧭 **The requirements are the author's own; most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author.** An independent review by a different vendor's AI (the `codex` CLI) was also required at every stage. See [how it was developed](docs/development_process_en.md).
+> 🧭 **The requirements are the author's own. Most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author.**
+>
+> - **The author's requirements**: cross-department knowledge search (motivated by weak collaboration between departments, so knowledge never gets shared) / five mixed file formats (Markdown/Word/Excel/PowerPoint/PDF) / all processing on a local LLM with zero external transmission / "graph engineering" in the development process
+> - **What AI turned those into**: a design map that splits the work into nodes (units of work), called a DAG; implementing nodes that don't depend on each other in parallel; and making an independent review by a different vendor's AI (the `codex` CLI) a required gate after each node
+> - **Proposed by AI, approved by the author after independent review**: the hybrid retrieval design (keyword search combined with semantic search), the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](docs/architecture_en.md#how-the-search-works-bm25-and-vector-search)), how citations are attached, and the evaluation split (measuring cross-department and same-department questions separately)
+> - AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits
+> - The author ran the UI and found the bugs and rough edges; the AI diagnosed and fixed them
+>
+> How it was developed (graph engineering and independent review) is detailed in [how it was developed](docs/development_process_en.md).
 
 ## Background and problem
 

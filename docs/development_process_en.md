@@ -16,7 +16,7 @@ What this document covers:
 
 - **The author's requirements**: cross-department knowledge search (motivated by weak collaboration between departments, so knowledge never gets shared) / five mixed file formats (Markdown/Word/Excel/PowerPoint/PDF) / all processing on a local LLM with zero external transmission / "graph engineering" in the development process
 - **What AI turned those into**: a design map that splits the work into nodes (a DAG), implementing independent nodes in parallel, and making an independent review by a different vendor's AI (the `codex` CLI) a required gate after each node
-- **Proposed by AI, approved by the author after independent review**: the hybrid retrieval design, the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](architecture_en.md#how-the-search-works-bm25-and-vector-search)), how citations are attached, and the evaluation design
+- **Proposed by AI, approved by the author after independent review**: the hybrid retrieval design, the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](architecture_en.md#how-the-search-works-bm25-and-vector-search)), how citations are attached, and the evaluation split (measuring cross-department and same-department questions separately)
 - AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits
 - The author ran the UI and found the bugs and rough edges; the AI diagnosed and fixed them
 
