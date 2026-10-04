@@ -123,6 +123,7 @@ streamlit run src/silo_rag/app.py
 The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
 
 ```mermaid
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph TB
     subgraph prep["① Preparation (once)"]
         direction LR
@@ -203,6 +204,7 @@ The requirement to "bring graph engineering into the development process" (see �
 The pipeline is designed as a DAG (directed acyclic graph) with clear dependencies between nodes. **This diagram is not the runtime flow; it is a design map of "which node uses the results of which node".** I used it during development to decide the build order and which parts could be built in parallel.
 
 ```mermaid
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph LR
     A["A datagen<br/>synthetic reports"] -->|files| B["B ingest<br/>load"]
     B -->|database| cd
@@ -230,18 +232,21 @@ graph LR
 A new node (`src/silo_rag/agent.py`) that **only calls the public functions** of nodes C and D. It doesn't touch the insides of C or D, and C and D stay independent of each other, so the **module dependencies are still a DAG**. The loop exists only inside this node, as part of the runtime flow.
 
 ```mermaid
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph TD
-    S((START)) -->|raw| R[retrieve: call search]
-    S -->|rewrite| P[plan: write a search query from the question]
+    S((START)) -->|raw| R["retrieve<br/>search<br/>(C's search)"]
+    S -->|rewrite| P["plan<br/>write a search query<br/>(C's plan_query)"]
     P --> R
-    R --> J[grade: is the evidence sufficient?]
-    J -->|sufficient, or attempt cap reached| SEL[select: only after multiple searches, rerank everything collected against the original question]
-    J -->|insufficient, under the cap| W[rewrite: write a query from a different angle]
+    R --> J["grade<br/>is the evidence<br/>sufficient?<br/>(G itself)"]
+    J -->|sufficient, or cap reached| SEL["select<br/>rerank all collected<br/>against the original<br/>question<br/>(C's rerank)<br/>(only if searched<br/>more than once)"]
+    J -->|insufficient, under the cap| W["rewrite<br/>write a query from<br/>a different angle<br/>(G itself)"]
     W -->|new query| R
     W -->|rewrite failed| SEL
-    SEL --> G[generate: call answer_question]
+    SEL --> G["generate<br/>write the answer<br/>(D's answer_question)"]
     G --> X((END))
 ```
+
+In the diagram, "(C's ...)" and "(D's ...)" are steps that call a function of that node, and "(G itself)" is a step that lives only in G. **G is not inside C or D; it is a separate node that calls functions of C and D.**
 
 - The LLM decides "is the evidence sufficient?" and "what query next"; the code decides "how many times at most" via `[agent] max_attempts` (1 by default, i.e., no re-search)
 - The first query is chosen by `[agent] first_query` (`raw` = the question as is; `rewrite` = a query the LLM writes from the question; `rewrite` by default)

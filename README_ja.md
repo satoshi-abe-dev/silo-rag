@@ -123,6 +123,7 @@ streamlit run src/silo_rag/app.py
 システムは、6つの**ノード**（処理のまとまり。A〜Fが、それぞれ1ファイル）でできている。動く時期は、3つに分かれる。質問に答える流れ（②）は、**画面のサイドバーの「回答方式」で、通常方式とエージェント方式を切り替えられる**。
 
 ```mermaid
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph TB
     subgraph prep["① 準備（1回だけ）"]
         direction LR
@@ -203,6 +204,7 @@ Cは、性質の違う2つの検索を組み合わせている。
 処理を、ノード間の依存関係が明確なDAG（directed acyclic graph、有向非巡回グラフ）として設計した。**この図は、実行時の流れではなく、「どのノードが、どのノードの成果を使うか」を表す設計図**。開発のときに、作る順番と、並列にできる部分を決めるために使った。
 
 ```mermaid
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph LR
     A["A datagen<br/>合成レポート"] -->|ファイル| B["B ingest<br/>取り込み"]
     B -->|データベース| cd
@@ -230,18 +232,21 @@ graph LR
 ノードC・Dの**公開関数だけを呼ぶ**新しいノード（`src/silo_rag/agent.py`）。C・Dの中身には手を入れず、C・Dは互いに依存しないままなので、**モジュール間の依存はDAGのまま**。ループがあるのは、このノードの内側（実行時の流れ）だけ。
 
 ```mermaid
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph TD
-    S((START)) -->|raw| R[retrieve: search を呼ぶ]
-    S -->|rewrite| P[plan: 質問から検索クエリを作る]
+    S((START)) -->|raw| R["retrieve<br/>検索<br/>（Cの search）"]
+    S -->|rewrite| P["plan<br/>検索クエリの作成<br/>（Cの plan_query）"]
     P --> R
-    R --> J[grade: 根拠は十分か判定]
-    J -->|十分、または上限到達| SEL[select: 複数回検索したときだけ、集めた候補を元の質問で並べ直す]
-    J -->|不十分・上限未満| W[rewrite: 別の切り口でクエリを作る]
+    R --> J["grade<br/>根拠は十分か判定<br/>（G自身）"]
+    J -->|十分、または上限到達| SEL["select<br/>集めた候補を<br/>元の質問で並べ直す<br/>（Cの rerank）<br/>複数回検索したときだけ"]
+    J -->|不十分・上限未満| W["rewrite<br/>別の切り口で<br/>クエリを作る<br/>（G自身）"]
     W -->|新しいクエリ| R
     W -->|書き直し失敗| SEL
-    SEL --> G[generate: answer_question を呼ぶ]
+    SEL --> G["generate<br/>回答を作る<br/>（Dの answer_question）"]
     G --> X((END))
 ```
+
+図の中の「（Cの …）」「（Dの …）」は、そのノードの関数を呼ぶ処理。「（G自身）」は、Gの中だけの処理。**GはC・Dの中にあるのではなく、C・Dの関数を呼ぶ、別のノード**。
 
 - 「根拠が十分か」「次のクエリ」はLLMが判断し、「何回まで繰り返すか」は`[agent] max_attempts`（既定1回＝再検索しない）でコードが決める
 - 1回目のクエリは、`[agent] first_query`で選ぶ（`raw`＝質問そのまま、`rewrite`＝LLMが質問から検索クエリを作る。既定は`rewrite`）
