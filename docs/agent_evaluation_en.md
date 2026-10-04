@@ -1,15 +1,37 @@
-# Evaluation details for the agent mode (nodes G and H)
+# The agent mode's evaluation
 
-The tables, numbers, question sets and measuring method behind the evaluation in the "Node G" section of the [README](../README_en.md). The README carries only the summary and the conclusion. The terms used here ("plain mode", "agent mode", "search-query writing") are explained in the [Node G](../README_en.md#node-g-the-langgraph-agent) section of the README.
+[日本語](agent_evaluation_ja.md) | English
 
-## Evaluation
+The accuracy of the plain mode, the agent mode (node G) and LangChain's stock agent (node H), compared on the same question sets. How the modes differ and what the settings mean is in [the agent mode's design](agent_en.md).
 
-- The tables below are from one evaluation set (15 questions, 5 of them cross-department), run once per variant. **These 15 questions are the ones I was looking at when I designed the search-query writing, so the design probably fits them especially well** (the 45-question re-measurement is further down). 7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit)
-- "Query writing" is `first_query = "rewrite"`; "1 search" is `max_attempts = 1`
+## Summary
+
+- **15 questions**: on a 7B model, the agent mode (write a search query, then search once) looked much better than plain mode (hit_rate 0.60 → 0.93). But these 15 questions are the ones I was looking at when I designed it, so the design probably fits them especially well
+- **Re-measured on 45 questions, the difference is within chance**: comparing plain mode without and with search-query writing, hit_rate goes 0.71 → 0.76 on 7B and 0.76 → 0.80 on 32B; the agent's defaults on 7B also give 0.76. Counting, question by question, how many got better and how many got worse, the difference is what chance alone can produce
+- **Conclusion**: plain mode stays the default answer mode, and search-query writing (`[retrieval] rewrite_query`) stays off
+
+## How to read the tables
+
+| Term | Meaning |
+| --- | --- |
+| hit_rate | The share of questions whose final search results (top 5) include the correct report. Higher is better |
+| Cross-dept / Same-dept | hit_rate counted over cross-department questions only / same-department questions only |
+| MRR | The average of 1 / (rank of the correct report): 1 if it is first, 0.5 if second, 0 if it is not in the results. Higher means the correct report ranks higher |
+| Citation rate | The share of questions whose answer text cites the ID of the correct report |
+| judge | The average score (1 to 5) an LLM gave each answer after comparing it with the correct evidence |
+| Searches / LLM calls / Sec/question | Averages per question; a guide to cost and time |
+| 7B / 32B | The size of the model used (7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx`, both in LM Studio, 4-bit) |
+| G strict / G lenient | The agent mode with strict / lenient grading of whether the evidence is sufficient |
+| Query writing | Before the first search, the LLM writes a search query from the question (`first_query = "rewrite"`) |
+| 1 search | Search only once (`max_attempts = 1`; no grading and no second search) |
+
+## Comparison on 15 questions
+
+- The tables below are from one evaluation set (15 questions, 5 of them cross-department), run once per variant. **These 15 questions are the ones I was looking at when I designed the search-query writing, so the design probably fits them especially well** (the 45-question re-measurement is further down)
 - "LLM calls" are the chat calls up to the answer (embeddings and judge excluded). Measured before "skip grading at the cap", so each question that reached the cap actually costs one call fewer
 - The judge uses the same model as the answerer, so **judge scores are only comparable between rows of the same model**
 
-**7B**
+### 7B
 
 | Variant | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | Searches | LLM calls | Sec/question |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -19,9 +41,9 @@ The tables, numbers, question sets and measuring method behind the evaluation in
 | G strict + query writing | 0.80 | 0.60 | 0.90 | 0.66 | 0.80 | 3.73 | 2.4 | 9.0 | 19.5 |
 | G lenient + query writing | 0.87 | 0.60 | 1.00 | 0.69 | 0.80 | 3.60 | 1.6 | 6.2 | 14.9 |
 | **G lenient + query writing + 1 search** | **0.93** | **0.80** | 1.00 | 0.72 | **0.87** | 3.53 | 1.0 | 4.0 | **12.0** |
-| LangChain stock ([node H](../README_en.md#node-h-langchain-integration)) | **0.93** | **0.80** | 1.00 | 0.54 | **0.87** | 3.73 | 1.3 | 3.3 | 18.6 |
+| LangChain stock ([node H](agent_en.md#node-h-langchain-integration)) | **0.93** | **0.80** | 1.00 | 0.54 | **0.87** | 3.73 | 1.3 | 3.3 | 18.6 |
 
-**32B**
+### 32B
 
 | Variant | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | Searches | LLM calls | Sec/question |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -33,7 +55,7 @@ The tables, numbers, question sets and measuring method behind the evaluation in
 
 I didn't measure the 32B model with the stock LangChain agent (LM Studio's model list shows no tool-support icon for it).
 
-**What the results show**
+### What the results show
 
 - **On the 15 questions, what helped looked like not "searching again" but "writing a search query from the question" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. Cross-department questions also rose from 0.40 to 0.80. The step-by-step breakdown of where it helps is in the [worked example](worked_example_en.md) (also from the 15 questions). **However, re-measured on 45 questions, this effect could not be confirmed** (see "Re-measured on 45 questions" below)
 - **This breakdown was prompted by losing to the stock LangChain agent.** It reached 0.93 without searching more. Looking into it, the LLM wrote a keyword-style query from the question before every search, while my G used the question as is on the first search. My original hypothesis ("re-search makes up for it") was only half right
@@ -41,7 +63,7 @@ I didn't measure the 32B model with the stock LangChain agent (LM Studio's model
 - **Conclusion: plain mode stays the default answer mode; the agent looked better on small models with the 15 questions, but on 45 questions no difference from plain mode could be confirmed.** The agent's defaults are `first_query = "rewrite"` with `max_attempts = 1`, the best-measured on the 15 questions (the "query writing + 1 search" rows). Re-measured on 7B with 45 questions, these defaults behave the same as plain mode with search-query writing turned on, and the difference is within chance (see "Re-measured on 45 questions" below). The re-search loop is available by raising `max_attempts`, but it showed no benefit on top of query writing with either model. With larger models, use plain mode
   - After making these the defaults, I re-ran both models; per-question hit/miss and metrics such as hit_rate matched. LLM calls dropped from the 4.0 in the table to 3.0 because grading is skipped at the cap
 
-**Re-measured on 45 questions (plain mode, without and with search-query writing)**
+## Re-measured on 45 questions (plain mode, without and with search-query writing)
 
 I turned on `rewrite_query` in plain mode's `search()`, and ran the agent's defaults (`first_query = "rewrite"`, `max_attempts = 1`) on 7B, with more questions: 45, one run per condition.
 

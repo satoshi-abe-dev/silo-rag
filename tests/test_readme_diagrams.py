@@ -1,4 +1,4 @@
-"""READMEのMermaid図が、GitHub上で文字切れしないための決まりを守っているかを調べるテスト。
+"""READMEとdocsのMermaid図が、GitHub上で文字切れしないための決まりを守っているかを調べるテスト。
 
 Mermaidは、スペースの無い日本語を途中で折り返せず、1行が約200px（全角13文字ほど）を超えると、
 ノードの端で文字が切れる。このテストは、ノードのラベルを<br/>で分けた各行の表示幅（全角=2、半角=1）が
@@ -15,6 +15,12 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README_FILES = ["README_ja.md", "README_en.md"]
+# README と、図を含む docs の文書（READMEから docs へ図を移しても、検査から外れないように）。
+DIAGRAM_FILES = README_FILES + sorted(
+    f"docs/{p.name}"
+    for p in (REPO_ROOT / "docs").glob("*.md")
+    if "```mermaid" in p.read_text(encoding="utf-8")
+)
 MAX_LINE_WIDTH = 24  # 全角12文字ぶん（全角=2、半角=1で数える）
 
 # ノードのラベル: ID["…"] / ID[…] / ID((…))。subgraphの見出し・辺のラベルは対象外。
@@ -35,7 +41,7 @@ def test_readme_has_diagrams(name):
     assert blocks, f"{name} にMermaidの図が見つからない（このテストが空振りしている）"
 
 
-@pytest.mark.parametrize("name", README_FILES)
+@pytest.mark.parametrize("name", DIAGRAM_FILES)
 def test_every_diagram_starts_with_the_init_directive(name):
     for i, block in enumerate(_mermaid_blocks(REPO_ROOT / name), 1):
         assert block.startswith("%%{init:"), (
@@ -43,7 +49,7 @@ def test_every_diagram_starts_with_the_init_directive(name):
         )
 
 
-@pytest.mark.parametrize("name", README_FILES)
+@pytest.mark.parametrize("name", DIAGRAM_FILES)
 def test_no_node_label_line_is_too_wide(name):
     too_wide: list[str] = []
     for i, block in enumerate(_mermaid_blocks(REPO_ROOT / name), 1):
