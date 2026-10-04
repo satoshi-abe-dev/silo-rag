@@ -133,12 +133,12 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 
 ## Architecture
 
-The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
+The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times and are used by different people. **End users use only ②** (asking questions on the screen). ① is a one-time preparation that whoever installs the system runs from the command line. ③ is a measurement that only developers use. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
 
 ```mermaid
 %%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph TB
-    subgraph prep["① Preparation (a command, once only)"]
+    subgraph prep["① Preparation (at install time, a command, once only)"]
         direction LR
         A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
     end
@@ -150,11 +150,11 @@ graph TB
         direction LR
         U2(["User:<br/>types a question,<br/>presses Send"]) --> F2["F app<br/>takes the question"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>writes the answer"] --> R2(["Shown on screen:<br/>the answer<br/>cited past cases<br/>the agent's actions"])
     end
-    subgraph ev["③ Measure search and answer accuracy (command): plain mode (default)"]
+    subgraph ev["③ For developers: measure search and answer accuracy (command): plain mode (default)"]
         direction LR
         E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]
     end
-    subgraph ev2["③ Measure search and answer accuracy: using G or H (optional)"]
+    subgraph ev2["③ For developers: measure search and answer accuracy: using G or H (optional)"]
         direction LR
         E2["E eval<br/>evaluate"] -->|"set on the command line<br/>--pipeline agent"| G2["G agent<br/>agent mode"] --> CD2["calls C's and D's<br/>functions to measure<br/>accuracy"]
         E2 -->|"set on the command line<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD2
@@ -165,11 +165,11 @@ graph TB
     ev ~~~ ev2
 ```
 
-- **① Preparation** (a command, run once): A makes the synthetic reports, and B loads them into the search data (ChromaDB)
+- **① Preparation** (whoever installs the system runs it once from the command line): A makes the synthetic reports, and B loads them into the search data (ChromaDB)
 - **② Create an answer from the question** (it runs when the user types a question in the text box and presses "Send"; the answer mode is switched in the sidebar). F handles the screen (the text box, the "Send" button, the sidebar) and shows the result: the answer and the past cases it cited
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run. The screen also shows a record of what the agent did
-- **③ Measure search and answer accuracy** (evaluation): the developer runs it from the command line, on questions whose correct answers are known, when measuring accuracy (it is not part of the flow that answers a question)
+- **③ Measure search and answer accuracy** (evaluation, for developers): developers run it from the command line, on questions whose correct answers are known, to compare the plain mode, G and H with numbers and decide between them (end users do not use it; it is not part of the flow that answers a question)
   - **Plain mode** (default): E calls C's search function and D's answer-generation function directly and measures them
   - **Using G or H** (optional): E goes through G or H to call the functions of C and D and measures them. How to switch is in the table below
 
