@@ -152,6 +152,7 @@ graph TB
     subgraph ev["③ Evaluation (separate task)"]
         direction LR
         E["E eval<br/>evaluate"] --> CD["calls C's and D's<br/>functions to measure<br/>accuracy"]
+        E -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper<br/>(evaluation only)"] --> CD
     end
     prep ~~~ plain
     plain ~~~ agent
@@ -162,7 +163,7 @@ graph TB
 - **② Create an answer from the question** (the answer mode is switched in the sidebar)
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run
-- **③ Evaluation**: E calls C's search function and D's answer-generation function to measure retrieval accuracy and answer quality. It is a separate task from answering questions
+- **③ Evaluation**: E calls C's search function and D's answer-generation function to measure retrieval accuracy and answer quality. It is a separate task from answering questions. Only with `--pipeline langchain` does E go through H to call the functions of C and D (H cannot be used from the UI)
 
 The optional nodes G and H, in detail:
 

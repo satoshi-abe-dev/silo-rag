@@ -152,6 +152,7 @@ graph TB
     subgraph ev["③ 評価（別の作業）"]
         direction LR
         E["E eval<br/>評価"] --> CD["C・D の機能を呼んで<br/>精度を測る"]
+        E -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携<br/>（評価でのみ使う）"] --> CD
     end
     prep ~~~ plain
     plain ~~~ agent
@@ -162,7 +163,7 @@ graph TB
 - **② 質問から回答を作成**（回答方式は、サイドバーで切り替える）
   - **通常方式**（既定）: Fが、Cの検索の機能（`search`）を呼び、その結果を、Dの回答生成の機能（`answer_question`）に渡す
   - **エージェント方式**（オプション）: Fは、CとDを直接呼ぶ代わりに、Gを呼ぶ。Gは、Cの機能（クエリの作成`plan_query`・検索`search`・並べ直し`rerank`）と、Dの機能（回答の作成`answer_question`）を呼びながら、判定と再検索を行う。初期設定では、検索は1回で、判定と再検索は動かない
-- **③ 評価**: Eが、Cの検索の機能とDの回答生成の機能を呼んで、検索精度と回答品質を測る。質問に答える流れとは、別の作業
+- **③ 評価**: Eが、Cの検索の機能とDの回答生成の機能を呼んで、検索精度と回答品質を測る。質問に答える流れとは、別の作業。`--pipeline langchain`のときだけ、EはHを経由して、C・Dの機能を呼ぶ（Hは画面からは使えない）
 
 オプションのノードG・Hの役割は、次のとおり。
 
