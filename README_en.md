@@ -220,15 +220,14 @@ graph TB
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run. The screen also shows a record of what the agent did
 - **③ Measure search and answer accuracy** (evaluation, for developers): developers run it from the command line, on questions whose correct answers are known, to compare the plain mode, G and H with numbers and decide between them (end users do not use it; it is not part of the flow that answers a question)
   - **Plain mode** (default): E calls C's search function and D's answer-generation function directly and measures them
-  - **Using G or H** (optional): E goes through G or H to call the functions of C and D and measures them. How to switch is in the table below
+  - **Using G or H** (optional): E goes through G or H to call the functions of C and D and measures them. How to use them is in "Using G and H" below
 
-The optional nodes G and H are switched on like this:
+**Using G and H** (plain mode needs nothing: it works from the start, both on the screen and when measuring accuracy)
 
-| | ② Answering a question (UI) | ③ Measuring accuracy (command) | Install first |
-| --- | --- | --- | --- |
-| Plain mode (default) | "Answer mode" in the sidebar: "plain" | `python -m silo_rag.eval` | nothing |
-| **G** agent mode | "Answer mode" in the sidebar: "agent" | `python -m silo_rag.eval --pipeline agent` | `pip install -e ".[agent]"` |
-| **H** LangChain integration | **not available** (it does not appear in the UI) | `python -m silo_rag.eval --pipeline langchain` | `pip install -e ".[langchain]"` |
+- **To use G (agent mode)**: first run `pip install -e ".[agent]"` once. That enables two things
+  - On the screen: choose "agent" under "answer mode" in the sidebar, and G answers (you can switch back to plain mode question by question)
+  - Measuring accuracy: run `python -m silo_rag.eval --pipeline agent`, and the measurement uses G
+- **To use H (LangChain integration)**: first run `pip install -e ".[langchain]"` once. H cannot be used on the screen. It is used only when measuring accuracy with `python -m silo_rag.eval --pipeline langchain` (to compare LangChain's stock agent with G)
 
 What G and H do:
 
