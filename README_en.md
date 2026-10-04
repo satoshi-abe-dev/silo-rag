@@ -93,7 +93,7 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 
 ### Using the agent version (optional)
 
-On top of plain mode (the question is searched almost as is, then answered), there is an agent mode in which the LLM writes a search query before searching. A setting makes it search again when the results fall short (by default it does not). Design and evaluation: [Node G](#node-g-the-langgraph-agent), [Node H](#node-h-langchain-integration). LangGraph and LangChain are optional dependencies; plain mode works without them.
+On top of plain mode (the question is searched almost as is, then answered), there is an agent mode in which the LLM writes a search query before searching. A setting makes it search again when the results fall short (by default it does not). Design and evaluation: [Node G](#node-g-the-langgraph-agent), [Node H](#node-h-langchain-integration). LangGraph and LangChain are extra libraries used only by the agent mode; plain mode works without them.
 
 ```bash
 pip install -e ".[agent]"        # LangGraph agent (node G)
@@ -353,7 +353,7 @@ I turned on `rewrite_query` in plain mode's `search()`, and ran the agent's defa
 
 ### Problems found along the way
 
-- **Three findings from the independent review (codex)**: CI didn't install the optional dependency; a retry pushed out all earlier evidence; the grading prompt had no conversation history. Each was reproduced with a mock, fixed, and given a regression test
+- **Three findings from the independent review (codex)**: CI didn't install the extra libraries for the agent mode (LangGraph etc.); a retry pushed out all earlier evidence; the grading prompt had no conversation history. Each was reproduced with a mock, fixed, and given a regression test
 - **Three findings from running a real LLM (7B)** (mock-based tests alone didn't surface these): grading was so strict it retried up to the cap every time; the queries written for the second search included the asker's own department; interleaving the retries' results pushed out a gold report the original query had found (fixed by the `select` node, which reranks everything collected against the original question)
 - **A design mistake found by the evaluation**: the original hypothesis that "re-search helps" was only half right. And the next conclusion, "writing a search query helps", was too strong because it was tuned to the 15 questions (found by re-measuring on 45)
 
