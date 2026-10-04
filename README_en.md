@@ -62,9 +62,11 @@ Adjust the base URL and model names in `config.toml` (environment variables such
 
 ## Usage
 
-There are two ways to prepare data. Do one of them, then launch the UI.
+Usage has three steps. In **step 1** you prepare the data; in **step 2** you launch the UI and ask questions. **Step 3** is only for when you want the agent mode.
 
-### Using the demo data
+### Step 1: Prepare the data (either A or B)
+
+#### A. Using the demo data
 
 ```bash
 bash scripts/prepare_demo_data.sh
@@ -80,7 +82,7 @@ python -m silo_rag.eval      # evaluate retrieval accuracy and answer quality (r
 
 - A "generation failed" message during `datagen` appears because a small local LLM doesn't always follow the required heading structure. It retries automatically, so it usually succeeds if you wait. If it keeps failing, try another model or re-run later
 
-### Using your own reports
+#### B. Using your own reports
 
 - Skip `datagen` and `eval` (`eval` needs the synthetic QA pairs) and run only `ingest`
 
@@ -91,7 +93,15 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 - The parser is generic: any Markdown/Word/Excel/PowerPoint/PDF split into a `---` frontmatter block plus `## heading` sections loads, whatever the field and heading names
 - The UI's filters (department / project type) use the demo's fixed vocabulary, so they may not match your categories (cross-department search itself works without the filters)
 
-### Using the agent version (optional)
+### Step 2: Launch the UI
+
+Run it after step 1. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
+
+```bash
+streamlit run src/silo_rag/app.py
+```
+
+### Step 3 (optional): Use the agent mode
 
 On top of plain mode (the question is searched almost as is, then answered), there is an agent mode in which the LLM writes a search query before searching. A setting makes it search again when the results fall short (by default it does not). Design and evaluation: [Node G](#node-g-the-langgraph-agent), [Node H](#node-h-langchain-integration). LangGraph and LangChain are extra libraries used only by the agent mode; plain mode works without them.
 
@@ -103,14 +113,6 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 - **UI**: once either of the above is installed, "agent" appears under "answer mode" in the sidebar (without it, only the plain mode is offered). Which mode answers is **switched in the UI, question by question** (no reinstalling). Node H (`.[langchain]`) does not appear in the UI; it is only for the evaluation command. A record of what the agent did (writing the query, searching, and, if it searched again, grading and the second search) appears under each answer
 - **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`); `--pipeline langchain` for the stock LangChain agent. To compare them all: `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]`
 - **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The defaults are `first_query = "rewrite"` and `max_attempts = 1` (write the query, search once), the combination that measured best on a 7B model with the 15 questions (on 45 questions no difference from plain mode could be confirmed; see "Evaluation" below)
-
-### Launching the UI
-
-It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
-
-```bash
-streamlit run src/silo_rag/app.py
-```
 
 ## Constraints and scope
 
