@@ -20,6 +20,17 @@
 - **Value proposition**: as long as documents are kept in the right place, RAG can search and reuse them across departments, even when sharing between departments is imperfect
 - **The data is synthetic**: retrospective reports for five generic business departments (marketing / sales / product development / customer support / corporate planning). No company names appear. Five file formats are mixed, and each report's outcome chart (a KPI trend or similar) is captioned by a local VLM at ingest time so the image content is searchable
 
+## Screenshots
+
+The "answer mode" in the sidebar switches between the plain mode and the agent mode, question by question (both screenshots are the same question asked of the synthetic data; the UI itself is in Japanese).
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/gui_plain.png" alt="The plain mode: with the sidebar set to the plain mode, a question returns an answer and the past cases it drew on"><br><b>Plain mode</b>: searches the question almost as is, and shows the answer and the past cases it drew on (citations)</td>
+<td width="50%"><img src="docs/screenshots/gui_agent.png" alt="The agent mode: under the answer, a 'what the agent did' record (query writing, search, grading, answer generation)"><br><b>Agent mode</b> (optional): writes a search query, then searches. A record of what the agent did appears under the answer</td>
+</tr>
+</table>
+
 ## Setup
 
 ### Prerequisites
@@ -89,7 +100,7 @@ pip install -e ".[agent]"        # LangGraph agent (node G)
 pip install -e ".[langchain]"    # LangChain integration (node H); also installs langgraph
 ```
 
-- **UI**: pick "agent" under "answer mode" in the sidebar. A record of what the agent did (writing the query, searching, and, if it searched again, grading and the second search) appears under each answer
+- **UI**: once either of the above is installed, "agent" appears under "answer mode" in the sidebar (without it, only the plain mode is offered). Which mode answers is **switched in the UI, question by question** (no reinstalling). Node H (`.[langchain]`) does not appear in the UI; it is only for the evaluation command. A record of what the agent did (writing the query, searching, and, if it searched again, grading and the second search) appears under each answer
 - **Evaluation**: `python -m silo_rag.eval --pipeline agent` (`--grade-mode strict|lenient`, `--first-query raw|rewrite`); `--pipeline langchain` for the stock LangChain agent. To compare them all: `bash scripts/compare_pipelines.sh <model name> [--rewrite-first]`
 - **Config**: `[agent]` in `config.toml` (`max_attempts`, `grade_mode`, `first_query`). The defaults are `first_query = "rewrite"` and `max_attempts = 1` (write the query, search once), the combination that measured best on a 7B model with the 15 questions (on 45 questions no difference from plain mode could be confirmed; see "Re-measured on 45 questions" below)
 
@@ -111,6 +122,7 @@ streamlit run src/silo_rag/app.py
 > **If you just want to run it, this is enough.**
 > The rest covers the design and the development process. Read only what interests you.
 >
+> - What it looks like: [Screenshots](#screenshots)
 > - How the system is organized: [Architecture](#architecture)
 > - How one question becomes an answer: [Worked example](#worked-example-how-one-question-becomes-an-answer)
 > - How it was developed: [Development process](#development-process-graph-engineering--independent-review)
