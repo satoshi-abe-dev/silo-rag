@@ -15,7 +15,7 @@ search; vector search = semantic search).
 - The values were taken in October 2026 with throwaway scripts (not included in the repository). They step through the
   inside of `search()` one stage at a time, and the script checked that the result matched the real `search()`.
   **Steps that involve an LLM vary a little from run to run, even at temperature 0** (the query written for the same
-  question differed in wording and spacing between runs). Read the values as "one particular run".
+  question differed in wording and spacing between runs). The values come from one particular run.
 
 ## The overall flow
 

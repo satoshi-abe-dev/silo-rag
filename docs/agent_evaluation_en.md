@@ -84,7 +84,7 @@ I turned on `rewrite_query` in plain mode's `search()`, and ran the agent's defa
 - **The agent's defaults behave the same as plain mode with search-query writing turned on (7B).** The retrieved reports are identical, in order, for 44 of 45 questions, and the hit/miss outcome is identical for all 45 (one question differed slightly because of LLM variation). With one search, no grading or re-search happens, so it is just "write the query, search, answer". So its difference from plain mode is the same as that of search-query writing above, within chance (7 better, 5 worse, p=0.77). I did not measure 32B because the structure is the same. The re-search loop (raising `max_attempts`) was not measured on 45 questions
 - **Conclusion**: since no effect could be confirmed, `[retrieval] rewrite_query` stays off
 
-> ⚠️ **Every result is a single run per condition. A one-question difference (0.07 on 15 questions, 0.02 on 45) can't be called real; read the results as a trend on these question sets.**
+> ⚠️ **Every result is a single run per condition. A one-question difference (0.07 on 15 questions, 0.02 on 45) can't be called real; the results show a trend on these question sets.**
 >
 > - Temperature 0 does not guarantee an exact repeat. What varies is answer generation (citation rate, judge) and the stock LangChain agent's search (its tool query is written by the LLM at temperature 0.2 each time)
 > - The stock agent's variation is something I observed across several runs I stopped partway; only the last run's result is saved, so the numbers don't back it up

@@ -2,7 +2,7 @@
 
 [日本語](README_ja.md) | English
 
-**A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.** Built as a portfolio project.
+**A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.**
 
 > 🧭 **The requirements are the author's own. Most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author.**
 >
@@ -17,7 +17,7 @@
 ## Background and problem
 
 - **Problem**: when starting a new project, you want to find similar past work, but each department uses its own terms and document formats, so other departments' lessons get buried
-- **Solution**: as long as documents are kept in the right place, the assistant searches across departments and answers with citations, even when sharing between departments is imperfect
+- **Solution**: once each department's documents are loaded into the assistant, it searches across departments and answers with citations, even when sharing between departments is imperfect
 - **The data is synthetic**: 60 retrospective reports for five generic business departments (marketing / sales / product development / customer support / corporate planning), written by an LLM. Five file formats are mixed: Markdown, Word, Excel, PowerPoint and PDF. Images inside the reports (such as KPI trend charts) are turned into text by an AI that can read images (a VLM), so they can be searched too
 
 ## Screenshots
@@ -109,7 +109,7 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 >
 > - **`ingest` replaces the search data.** If you loaded the demo data with A first, its search data (ChromaDB) is removed. The synthetic report files (`data/synth_reports/`) stay, so to go back to the demo, run `python -m silo_rag.ingest` without a folder. If `ingest` fails partway, nothing is replaced and the existing data is not damaged
 > - **You cannot measure accuracy as is.** `eval` (which measures retrieval accuracy and answer quality) needs the synthetic data's own questions and correct answers. To measure on your reports, you have to prepare questions with known correct answers yourself
-> - **Do not rely on the accuracy figures in this README.** The share of questions whose correct document was found (hit_rate) and the other figures are results on the synthetic data (60 reports). The same accuracy is not guaranteed on your reports
+> - **The accuracy figures in this README may not carry over.** The share of questions whose correct document was found (hit_rate) and the other figures are results on the synthetic data (60 reports). The same accuracy is not guaranteed on your reports
 > - **The UI's filters (department / project type) use the demo's fixed vocabulary.** They may not match your categories. Cross-department search itself works without the filters
 > - **What has not been tried.** I tried only the 60 synthetic reports. Large volumes of data, materials with very uneven formatting, badly laid-out PDFs, and real documents with a small local model (such as 7B, i.e. 7 billion parameters) have not been checked
 
@@ -247,7 +247,7 @@ The AI models each node uses, and how the search works (BM25 keyword search and 
 - **Conclusion**: plain mode stays the default answer mode; the agent mode is kept as an option
 - **More**: how it is built and why, in [the agent mode's design](docs/agent_en.md); the tables and how it was measured, in [the agent mode's evaluation](docs/agent_evaluation_en.md)
 
-> ⚠️ Every result is a single run per condition. A difference of one question cannot be called conclusive. Read the numbers as a "tendency" on this question set.
+> ⚠️ Every result is a single run per condition. A difference of one question cannot be called conclusive. They show a "tendency" on this question set.
 
 ## How it was developed
 
