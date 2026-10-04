@@ -129,11 +129,11 @@ graph TB
         direction LR
         A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
     end
-    subgraph plain["② Create an answer from the question (every question): plain mode (default)"]
+    subgraph plain["② Create an answer from the question: plain mode (default)"]
         direction LR
         F1["F app<br/>UI"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>answer"]
     end
-    subgraph agent["② Create an answer from the question (every question): agent mode (optional)"]
+    subgraph agent["② Create an answer from the question: agent mode (optional)"]
         direction LR
         F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
     end
@@ -147,7 +147,7 @@ graph TB
 ```
 
 - **① Preparation**: A makes the synthetic reports, and B loads them into the search data (ChromaDB)
-- **② Create an answer from the question** (runs on every question; the answer mode is switched in the sidebar)
+- **② Create an answer from the question** (the answer mode is switched in the sidebar)
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run
 - **③ Evaluation**: E calls C and D to measure retrieval accuracy and answer quality. It is a separate task from answering questions
