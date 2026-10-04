@@ -183,7 +183,7 @@ C combines two searches of different kinds.
 
 ### Worked example: how one question becomes an answer
 
-[docs/worked_example_en.md](docs/worked_example_en.md) follows a question through every stage (ingestion, query writing, BM25, vector search, combining scores, reranking, answer generation) with real values. It has two examples (one that works, and one that doesn't: the gold report was among the candidates but dropped in reranking) and a step-by-step breakdown of where the query rewrite helps.
+[docs/worked_example_en.md](docs/worked_example_en.md) follows a question through every stage (ingestion, query writing, BM25, vector search, combining scores, reranking, answer generation) with real values. It has two examples (one that works, and one that doesn't: the gold report was among the candidates but dropped in reranking) and a step-by-step breakdown of where the query rewrite helps (from the 15 questions; on 45 questions the rewrite's effect could not be confirmed).
 
 ## Development process (graph engineering + independent review)
 
@@ -223,12 +223,12 @@ graph TD
 - **Auxiliary decisions never stop the run.** A connection error, malformed output, or repeated query in grading or rewriting moves on to generation with the chunks in hand
 - **Zero external transmission is unchanged.** Every LLM call goes through the existing local `LLMClient`. LangGraph sends nothing externally unless you set LangSmith environment variables
 - **Grading strictness has two levels (`strict` / `lenient`).** The grading LLM can't know whether a better document exists that it hasn't seen, so prompt wording alone doesn't settle which level is better. `strict` retried up to the cap on most questions (8 of 9 gradings said "insufficient"); `lenient` says "sufficient" quickly. I kept both and compared them
-- **You can choose whether the first query is written from the question (`first_query`).** A question contains a lot unrelated to search (a self-introduction, request phrasing), which I expected to scatter the search ([BM25](#terms-bm25-and-vector-search)). So I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself on failure). In the evaluation this mattered most. The query-writing itself lives in node C (`retrieval.plan_query`), and plain mode can turn it on with `[retrieval] rewrite_query` (off by default; measuring it in plain mode is still to do)
+- **You can choose whether the first query is written from the question (`first_query`).** A question contains a lot unrelated to search (a self-introduction, request phrasing), which I expected to scatter the search ([BM25](#terms-bm25-and-vector-search)). So I added a `plan` node that has the LLM write a search query from the question (falling back to the question itself on failure). On the 15-question evaluation this mattered most (but re-measured on 45 questions, no difference showed; see "Re-measured on 45 questions" below). The query-writing itself lives in node C (`retrieval.plan_query`), and plain mode can turn it on with `[retrieval] rewrite_query` (off by default; I measured plain mode on 45 questions and could not confirm any effect)
 - **Grading is skipped once the search cap is reached.** No further search is possible, so the verdict can't change anything
 
 ### Evaluation
 
-- The same evaluation set (15 questions, 5 of them cross-department) was run once per variant. 7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit)
+- The tables below are from one evaluation set (15 questions, 5 of them cross-department), run once per variant. **These 15 questions are the ones I was looking at when I designed the query rewriting, so the design probably fits them especially well** (the 45-question re-measurement is further down). 7B = `qwen2.5-7b-instruct`, 32B = `qwen2.5-coder-32b-instruct-mlx` (both in LM Studio, 4-bit)
 - "Query writing" is `first_query = "rewrite"`; "1 search" is `max_attempts = 1`
 - "LLM calls" are the chat calls up to the answer (embeddings and judge excluded). Measured before "skip grading at the cap", so each question that reached the cap actually costs one call fewer
 - The judge uses the same model as the answerer, so **judge scores are only comparable between rows of the same model**
@@ -259,24 +259,43 @@ I didn't measure the 32B model with the stock LangChain agent (LM Studio's model
 
 **What the results show**
 
-- **What helped was not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. Cross-department questions also rose from 0.40 to 0.80. The step-by-step breakdown of where it helps is in the [worked example](docs/worked_example_en.md)
+- **On the 15 questions, what helped looked like not "searching again" but "rewriting the question into a search query" (7B).** With the question used as is, adding re-search only moved hit_rate from 0.60 to 0.67–0.73. Having the LLM write the first query took it to 0.80–0.93, and **limiting it to a single search (0.93) did no worse**. Cross-department questions also rose from 0.40 to 0.80. The step-by-step breakdown of where it helps is in the [worked example](docs/worked_example_en.md) (also from the 15 questions). **However, re-measured on 45 questions, this effect could not be confirmed** (see "Re-measured on 45 questions" below)
 - **This breakdown was prompted by losing to the stock LangChain agent.** It reached 0.93 without searching more. Looking into it, the LLM rewrote the question into a keyword-style query before every search, while my G used the question as is on the first search. My original hypothesis ("re-search makes up for it") was only half right
 - **With 32B, none of the tweaks shows a clear effect.** Plain mode was already at 0.87; query writing + 1 search reached 0.93 (one question). Cross-department dropped from 1.00 to 0.80 (one question), and to 0.60 once re-search was added
-- **Conclusion: plain mode stays the default answer mode; the agent is an option for when you have to use a small model.** The agent's defaults are the best-measured `first_query = "rewrite"` with `max_attempts = 1` (the "query writing + 1 search" rows). The re-search loop is available by raising `max_attempts`, but it showed no benefit on top of query writing with either model. With larger models, use plain mode
+- **Conclusion: plain mode stays the default answer mode; the agent is an option for when you have to use a small model.** The agent's defaults are `first_query = "rewrite"` with `max_attempts = 1`, the best-measured on the 15 questions (the "query writing + 1 search" rows; I did not re-measure the agent on 45 questions). The re-search loop is available by raising `max_attempts`, but it showed no benefit on top of query writing with either model. With larger models, use plain mode
   - After making these the defaults, I re-ran both models; per-question hit/miss and metrics such as hit_rate matched. LLM calls dropped from the 4.0 in the table to 3.0 because grading is skipped at the cap
+
+**Re-measured on 45 questions (plain mode, without and with the rewrite)**
+
+I turned on `rewrite_query` in plain mode's `search()` and measured again with more questions: 45, one run per condition.
+
+| Model and variant | hit_rate | Cross-dept | Same-dept | MRR | Citation rate | judge | LLM calls | Sec/question |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 7B, no rewrite | 0.71 | 0.60 | 0.77 | 0.50 | 0.64 | 3.80 | 2.0 | 10.8 |
+| 7B, rewrite | 0.76 | 0.60 | 0.83 | 0.52 | 0.67 | 3.73 | 3.0 | 10.8 |
+| 32B, no rewrite | 0.76 | 0.47 | 0.90 | 0.57 | 0.69 | 3.11 | 2.0 | 49.3 |
+| 32B, rewrite | 0.80 | 0.60 | 0.90 | 0.61 | 0.73 | 2.93 | 3.0 | 50.5 |
+
+- **Questions**: 45 (15 cross-department, 30 same-department), built mechanically from the report specifications (no LLM). Same reports and same construction as the 15-question evaluation; 13 questions have the same wording as the 15, and 32 are new
+- **Counting hit_rate changes question by question, the difference is within chance** (sign test)
+  - 7B: 7 improved, 5 got worse (p=0.77)
+  - 32B: 6 improved, 4 got worse (p=0.75). Cross-department went from 0.47 to 0.60, but 4 improved and 2 got worse (p=0.69)
+- **Restricted to the 13 questions shared with the 15, there is an improvement; restricted to the 32 new ones, there is none.** Improved / got worse: 7B 4 / 0 on the 13 and 3 / 5 on the 32 new ones; 32B 2 / 0 on the 13 and 4 / 4 on the 32 new ones. The large improvement seen on the 15 questions probably looked large because the design was tuned to them
+- **Cost**: LLM calls go from 2.0 to 3.0 per question. The elapsed time is about the same (7B 10.8 to 10.8 s, 32B 49.3 to 50.5 s)
+- **Conclusion**: since no effect could be confirmed, `[retrieval] rewrite_query` stays off
 
 > ⚠️ **This is 15 questions, one run per variant. A one-question difference (0.07) can't be called real; read the results as a trend on these 15 questions.**
 >
 > - Temperature 0 does not guarantee an exact repeat. What varies is answer generation (citation rate, judge) and the stock LangChain agent's search (its tool query is written by the LLM at temperature 0.2 each time)
 > - The stock agent's variation is something I observed across several runs I stopped partway; only the last run's result is saved, so the numbers don't back it up
-> - That retrieval reproduces doesn't mean a different question set would give the same result
+> - That retrieval reproduces doesn't mean a different question set would give the same result. In fact, the query rewriting I chose on the 15 questions showed no effect on 45 questions (32 of them new)
 > - I also tried Gemma 4 26B (a thinking model), but it took about 174 s per question, so I cut it off midway and left it out of the comparison
 
 ### Problems found along the way
 
 - **Three findings from the independent review (codex)**: CI didn't install the optional dependency; a retry pushed out all earlier evidence; the grading prompt had no conversation history. Each was reproduced with a mock, fixed, and given a regression test
 - **Three findings from running a real LLM (7B)** (mock-based tests alone didn't surface these): grading was so strict it retried up to the cap every time; rewritten queries included the asker's own department; interleaving the retries' results pushed out a gold report the original query had found (fixed by the `select` node, which reranks everything collected against the original question)
-- **A design mistake found by the evaluation**: the original hypothesis that "re-search helps" was only half right
+- **A design mistake found by the evaluation**: the original hypothesis that "re-search helps" was only half right. And the next conclusion, "query rewriting helps", was too strong because it was tuned to the 15 questions (found by re-measuring on 45)
 
 ## Node H: LangChain integration
 
