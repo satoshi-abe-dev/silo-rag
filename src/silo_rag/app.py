@@ -43,8 +43,9 @@ def _filter_widgets() -> dict[str, str]:
     return filters
 
 
-_MODE_BASELINE = "通常（1回検索）"
-_MODE_AGENT = "エージェント（LangGraph・検索クエリを作ってから検索）"
+_MODE_BASELINE = "通常"
+_MODE_AGENT = "エージェント"
+_MODE_CAPTIONS = ["入力した質問のまま、資料を探す", "AIが検索用の言葉に直してから、資料を探す"]
 
 
 def _mode_widget() -> str:
@@ -53,7 +54,9 @@ def _mode_widget() -> str:
     if importlib.util.find_spec("langgraph") is None:
         st.sidebar.caption('エージェントを使うには `pip install -e ".[agent]"` が必要です。')
         return _MODE_BASELINE
-    return st.sidebar.radio("方式", [_MODE_BASELINE, _MODE_AGENT], label_visibility="collapsed")
+    return st.sidebar.radio(
+        "方式", [_MODE_BASELINE, _MODE_AGENT], captions=_MODE_CAPTIONS, label_visibility="collapsed"
+    )
 
 
 def _render_trace(trace: list[str] | None) -> None:
