@@ -6,7 +6,7 @@
 
 > 🧭 **The requirements are the author's own. Most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author.**
 >
-> - **The author's requirements**: cross-department knowledge search (motivated by weak collaboration between departments, so knowledge never gets shared) / five mixed file formats (Markdown/Word/Excel/PowerPoint/PDF) / all processing on a local LLM with zero external transmission / "graph engineering" in the development process
+> - **The author's requirements**: cross-department knowledge search (motivated by weak collaboration between departments, so knowledge never gets shared) / five mixed file formats (Markdown/Word/Excel/PowerPoint/PDF) / all processing on a local LLM with zero external transmission / "graph engineering" in the development process (splitting the work into nodes and designing with a diagram of how they depend on each other)
 > - **What AI turned those into**: a design map that splits the work into nodes (units of work), called a DAG; implementing nodes that don't depend on each other in parallel; and making an independent review by a different vendor's AI (the `codex` CLI) a required gate after each node
 > - **Proposed by AI, approved by the author after independent review**: the hybrid retrieval design (keyword search combined with semantic search), the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](docs/architecture_en.md#how-the-search-works-bm25-and-vector-search)), how citations are attached, and the evaluation split (measuring cross-department and same-department questions separately)
 > - AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits
@@ -17,12 +17,12 @@
 ## Background and problem
 
 - **Problem**: when starting a new project, you want to find similar past work, but each department uses its own terms and document formats, so other departments' lessons get buried
-- **How this helps**: as long as documents are kept in the right place, the assistant searches across departments and answers with citations, even when sharing between departments is imperfect
+- **Solution**: as long as documents are kept in the right place, the assistant searches across departments and answers with citations, even when sharing between departments is imperfect
 - **The data is synthetic**: 60 retrospective reports for five generic business departments (marketing / sales / product development / customer support / corporate planning), written by an LLM. Five file formats are mixed: Markdown, Word, Excel, PowerPoint and PDF. Images inside the reports (such as KPI trend charts) are turned into text by an AI that can read images (a VLM), so they can be searched too
 
 ## Screenshots
 
-The "answer mode" in the sidebar switches between the plain mode and the agent mode, question by question (both screenshots are the same question asked of the synthetic data; the UI itself is in Japanese).
+The "answer mode" in the sidebar switches between the plain mode and the agent mode, question by question (the agent mode is available only after installing the extra libraries in [step 4](#step-4-optional-install-the-agent-mode)). Both screenshots are the same question asked of the synthetic data; the UI itself is in Japanese.
 
 <table>
 <tr>
@@ -36,8 +36,8 @@ The "answer mode" in the sidebar switches between the plain mode and the agent m
 ### Prerequisites
 
 - Python 3.11 or later
-- A local LLM server with an OpenAI-compatible API, such as [LM Studio](https://lmstudio.ai/)
-  - Load three kinds of models: a chat model, an embedding model, and a **vision model (VLM) for image captioning** (e.g., the Qwen2.5-VL / Qwen3-VL family). Without the VLM only image captioning is skipped; everything else works
+- Software that runs AI models on your own computer, such as [LM Studio](https://lmstudio.ai/) (anything that can be called the same way as OpenAI's API)
+  - Models to load: a chat model that writes text, an embedding model that turns sentences into lists of numbers, and a **model that can read images (VLM)** (e.g., the Qwen2.5-VL / Qwen3-VL family). Without the VLM, only the image descriptions are skipped; everything else works
   - The default endpoint is `http://localhost:1234/v1`. For another server (e.g., Ollama at `http://localhost:11434/v1`), set `[ai] base_url` in `config.toml` or the `SILORAG_AI_BASE_URL` environment variable (priority: env var > `config.toml` > built-in default)
 
 ### Install
@@ -62,7 +62,7 @@ Adjust the base URL and model names in `config.toml` (environment variables such
 
 ## Usage
 
-Usage has four steps. In **step 1** you prepare the data, in **step 2** you launch the UI, and in **step 3** you ask questions on the screen. **Step 4** is only for when you want the agent mode.
+Usage has four steps. In **step 1** you prepare the data, in **step 2** you launch the screen (UI), and in **step 3** you ask questions on the screen. **Step 4** is only for when you want the agent mode.
 
 > [!IMPORTANT]
 > **Run the commands with the virtual environment activated.** Every time you open a new terminal, go to this repository's folder and run:
@@ -86,35 +86,36 @@ bash scripts/prepare_demo_data.sh
 It runs these three steps in order. To redo one step, run it directly.
 
 ```bash
-python -m silo_rag.datagen   # generate synthetic data (60 reports + 15 evaluation QA pairs by default)
-python -m silo_rag.ingest    # chunk, embed, and store in ChromaDB
-python -m silo_rag.eval      # evaluate retrieval accuracy and answer quality (results in data/eval/eval_results.json)
+python -m silo_rag.datagen   # write 60 synthetic reports and 15 evaluation questions with their correct answers
+python -m silo_rag.ingest    # split the reports by heading, turn them into lists of numbers, and store them in the search database (ChromaDB)
+python -m silo_rag.eval      # measure search and answer accuracy (results in data/eval/eval_results.json)
 ```
 
+- The third one, `eval`, is ③ in the [architecture](#architecture) (the accuracy measurement for developers). You don't need it just to ask questions on the screen, but the script runs it last as a check that everything works. To save time, run only the first two directly
 - A "generation failed" message during `datagen` appears because a small local LLM doesn't always follow the required heading structure. It retries automatically, so it usually succeeds if you wait. If it keeps failing, try another model or re-run later
 
 #### B. Using your own reports
 
-- Skip `datagen` and `eval` (`eval` needs the synthetic QA pairs) and run only `ingest`
+- Skip `datagen` and `eval` (`eval` needs the synthetic data's own questions and correct answers) and run only `ingest`
 
 ```bash
 python -m silo_rag.ingest --reports-dir <directory containing your reports>
 ```
 
-- The parser is generic: any Markdown/Word/Excel/PowerPoint/PDF split into a `---` frontmatter block plus `## heading` sections loads, whatever the field and heading names
+- It reads Markdown/Word/Excel/PowerPoint/PDF files that start with fields enclosed in `---` (frontmatter, such as department and date) and whose body is split by `## heading` lines. Field and heading names are up to you
 
 > [!WARNING]
 > **Things to know before using your own reports** (every number in this README comes from the synthetic data)
 >
 > - **`ingest` replaces the search data.** If you loaded the demo data with A first, its search data (ChromaDB) is removed. The synthetic report files (`data/synth_reports/`) stay, so to go back to the demo, run `python -m silo_rag.ingest` without a folder. If `ingest` fails partway, nothing is replaced and the existing data is not damaged
 > - **You cannot measure accuracy as is.** `eval` (which measures retrieval accuracy and answer quality) needs the synthetic data's own questions and correct answers. To measure on your reports, you have to prepare questions with known correct answers yourself
-> - **Do not rely on the accuracy figures in this README.** hit_rate and the rest are results on the synthetic data (60 reports). The same accuracy is not guaranteed on your reports
+> - **Do not rely on the accuracy figures in this README.** The share of questions whose correct document was found (hit_rate) and the other figures are results on the synthetic data (60 reports). The same accuracy is not guaranteed on your reports
 > - **The UI's filters (department / project type) use the demo's fixed vocabulary.** They may not match your categories. Cross-department search itself works without the filters
-> - **What has not been tried.** I tried only the 60 synthetic reports. Large volumes of data, materials with very uneven formatting, badly laid-out PDFs, and real documents with a small local model (such as 7B) have not been checked
+> - **What has not been tried.** I tried only the 60 synthetic reports. Large volumes of data, materials with very uneven formatting, badly laid-out PDFs, and real documents with a small local model (such as 7B, i.e. 7 billion parameters) have not been checked
 
-### Step 2: Launch the UI
+### Step 2: Launch the screen (UI)
 
-Run it after step 1. It opens a chat-style page in your browser (what it looks like is in [Screenshots](#screenshots)); how to ask questions is step 3. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
+Run it after step 1. It opens a chat-style page in your browser (what it looks like is in [Screenshots](#screenshots)); how to ask questions is step 3. The command keeps running while you use the screen (stop it with `Ctrl+C` in the terminal). To run other commands while the screen is open, use another terminal.
 
 ```bash
 streamlit run src/silo_rag/app.py --server.address localhost
@@ -146,7 +147,7 @@ Once installed, "エージェント" (agent) appears under "answer mode" in the 
 ## Constraints and scope
 
 - **The demo reports (60 of them) are synthetic data made by an LLM.** Their numbers (such as KPIs) and cases do not come from real business, and no real company names appear
-- **The application itself (UI, generated data, LLM prompts) is Japanese-only.** The bilingual README is for portfolio readability, separate from the app's language support
+- **The application itself (the screen, the generated data, the instructions given to the AI) is Japanese-only.** The bilingual README is for portfolio readability, separate from the app's language support
 
 > [!TIP]
 > **If you just want to run it, this is enough.** The rest explains how it works and how it was built.
@@ -241,8 +242,8 @@ The AI models each node uses, and how the search works (BM25 keyword search and 
 
 ## The agent mode (nodes G and H)
 
-- **What it does**: plain mode searches once with the question as is. The agent mode (node G) uses LangGraph to run "write a search query → search → grade whether the evidence is enough → if not, search again with other words". Node H has LangChain's stock agent do the same job, so it can be compared with G
-- **Results**: on a 7B model with 15 questions, the agent mode looked much better (hit_rate 0.60 → 0.93). But those 15 questions are the ones I was looking at when designing it; re-measured on 45 questions, the difference was within chance (plain mode without vs. with search-query writing: 0.71 → 0.76 on 7B, 0.76 → 0.80 on 32B)
+- **What it does**: plain mode searches once with the question almost as is. The agent mode (node G) uses LangGraph (a library for building the flow of an AI's steps) to run "write a search query → search → grade whether the evidence is enough → if not, search again with other words". Node H has the ready-made agent that comes with LangChain (a library for building AI applications) do the same job, so it can be compared with G
+- **Results**: compared by the share of questions whose correct document was found (hit_rate). On a smaller model (7B, i.e. 7 billion parameters) with 15 questions, the agent mode looked much better (plain 0.60 → agent 0.93). But those 15 questions are the ones I was looking at when designing it. Re-measured on 45 questions, 7B went 0.71 → 0.76, a difference within chance. On a larger model (32B, 32 billion), the agent mode's behavior (write a search query, then search once) was measured in plain mode: 0.76 → 0.80, also within chance
 - **Conclusion**: plain mode stays the default answer mode; the agent mode is kept as an option
 - **More**: how it is built and why, in [the agent mode's design](docs/agent_en.md); the tables and how it was measured, in [the agent mode's evaluation](docs/agent_evaluation_en.md)
 
@@ -250,7 +251,7 @@ The AI models each node uses, and how the search works (BM25 keyword search and 
 
 ## How it was developed
 
-- **Graph engineering**: the work was split into nodes, and the system was designed with a diagram (a DAG) of "which node uses which". Nodes that do not depend on each other (C and D) were implemented in parallel by two AI agents
+- **Graph engineering**: the work was split into nodes, and the system was designed with a diagram (a DAG) of "which node uses which". Nodes that do not depend on each other (C and D) were written at the same time by two AIs (Claude Code subagents, unrelated to the product's "agent mode")
 - **Independent review**: after each node, a review by a different vendor's AI (the `codex` CLI) was required. It caught a bug that gave BM25 negative weights, and a leak in the evaluation data
 - **Tests**: dependencies can be swapped for fakes, so every node can be tested on its own without a real LLM
 
@@ -264,7 +265,7 @@ See [how it was developed](docs/development_process_en.md).
 | [Worked example](docs/worked_example_en.md) | Follows one question to its answer, with real values |
 | [The agent mode's design](docs/agent_en.md) | Nodes G and H: the flow, settings, design decisions, and what running the stock agent showed |
 | [The agent mode's evaluation](docs/agent_evaluation_en.md) | Tables comparing plain mode, G and H; the 45-question re-measurement; problems found along the way |
-| [How it was developed](docs/development_process_en.md) | How the work was split between the author and AI; graph engineering; the node dependencies (DAG) |
+| [How it was developed](docs/development_process_en.md) | What graph engineering made easier; bugs the independent review caught; the node dependencies (DAG) |
 
 ## License
 
