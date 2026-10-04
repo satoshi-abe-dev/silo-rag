@@ -91,7 +91,14 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 ```
 
 - The parser is generic: any Markdown/Word/Excel/PowerPoint/PDF split into a `---` frontmatter block plus `## heading` sections loads, whatever the field and heading names
-- The UI's filters (department / project type) use the demo's fixed vocabulary, so they may not match your categories (cross-department search itself works without the filters)
+
+> [!WARNING]
+> **Things to know before using your own reports** (every number in this README comes from the synthetic data)
+>
+> - **You cannot measure accuracy as is.** `eval` (which measures retrieval accuracy and answer quality) needs the synthetic data's own questions and correct answers. To measure on your reports, you have to prepare questions with known correct answers yourself
+> - **Do not rely on the accuracy figures in this README.** hit_rate and the rest are results on the synthetic data (60 reports). The same accuracy is not guaranteed on your reports
+> - **The UI's filters (department / project type) use the demo's fixed vocabulary.** They may not match your categories. Cross-department search itself works without the filters
+> - **What has not been tried.** I tried only the 60 synthetic reports. Large volumes of data, materials with very uneven formatting, badly laid-out PDFs, and real documents with a small local model (such as 7B) have not been checked
 
 ### Step 2: Launch the UI
 
