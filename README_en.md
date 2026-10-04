@@ -62,7 +62,7 @@ Adjust the base URL and model names in `config.toml` (environment variables such
 
 ## Usage
 
-Usage has three steps. In **step 1** you prepare the data; in **step 2** you launch the UI and ask questions. **Step 3** is only for when you want the agent mode.
+Usage has four steps. In **step 1** you prepare the data, in **step 2** you launch the UI, and in **step 3** you ask questions on the screen. **Step 4** is only for when you want the agent mode.
 
 > [!IMPORTANT]
 > **Run the commands with the virtual environment activated.** Every time you open a new terminal, go to this repository's folder and run:
@@ -114,7 +114,7 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 
 ### Step 2: Launch the UI
 
-Run it after step 1. It opens a chat-style page in your browser (what it looks like is in [Screenshots](#screenshots)), and you type your questions there. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
+Run it after step 1. It opens a chat-style page in your browser (what it looks like is in [Screenshots](#screenshots)), How to ask questions is step 3. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
 
 ```bash
 streamlit run src/silo_rag/app.py --server.address localhost
@@ -122,7 +122,18 @@ streamlit run src/silo_rag/app.py --server.address localhost
 
 `--server.address localhost` makes the page reachable only from the browser on this computer. Without it, the page can also be opened from other devices on the same network.
 
-### Step 3 (optional): Use the agent mode
+### Step 3: Ask questions on the screen
+
+The sidebar (settings) is on the left; the questions and answers are on the right. The UI is in Japanese; the labels are quoted with an English gloss.
+
+- **Ask**: type a question in the text box at the bottom and press the "送信" (Send) button. The Enter key adds a new line and does not send (so that confirming Japanese input conversion does not send by mistake). While it works, "検索・回答生成中..." (searching and generating) is shown
+- **Read the answer**: under the answer, "参照した過去事例" (cited past cases) lists the sources as "report ID / section / department". Open one to see the text the answer was based on. If a similar case exists in another department, the answer includes it and says it is from another department
+- **When there is no answer**: if the material has nothing to do with the question, or the input is not a search question (small talk, greetings and so on), it answers "該当する事例が見つかりませんでした" (no matching case found). Questions about counts or totals ("how many in all?", "which is the most common?") get "分かりません" (I don't know), because it only sees the part of the material that the search found
+- **Ask follow-up questions**: questions that build on the previous one (e.g., "tell me more about that") work. The conversation history is used only to interpret search questions (it does not answer "what did I just say?"). Reloading the browser clears the history
+- **Answer mode (sidebar)**: switch between "通常（1回検索）" (plain, one search) and "エージェント（LangGraph・検索クエリを作ってから検索）" (agent: writes a search query, then searches), question by question. "エージェント" appears only after you install the extra libraries in step 4. When the agent answers, "エージェントの動き" (what the agent did: query writing, searching, grading) also appears under the answer
+- **Filters (optional, sidebar)**: narrow the search by "作成部署" (department) and "プロジェクト種別" (project type). Without them, it searches across all departments (with your own reports the categories may not match; see the caution in step 1 B)
+
+### Step 4 (optional): Install the agent mode
 
 On top of plain mode (the question is searched almost as is, then answered), there is an agent mode in which the LLM writes a search query before searching. A setting makes it search again when the results fall short (by default it does not). Design and evaluation: [Node G](#node-g-the-langgraph-agent), [Node H](#node-h-langchain-integration). LangGraph and LangChain are extra libraries used only by the agent mode; plain mode works without them.
 
