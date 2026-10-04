@@ -142,11 +142,11 @@ graph TB
     end
     subgraph plain["② 質問から回答を作成 ― 通常方式（既定）"]
         direction LR
-        U1(["利用者が質問を入力し<br/>「送信」を押す"]) --> F1["F app<br/>質問を受け取る"] --> C1["C retrieval<br/>検索"] --> D1["D generation<br/>回答の作成"] --> R1(["画面に表示:<br/>回答と<br/>参照した過去事例"])
+        U1(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F1["F app<br/>質問を受け取る"] --> C1["C retrieval<br/>検索"] --> D1["D generation<br/>回答の作成"] --> R1(["画面に表示:<br/>回答と<br/>参照した過去事例"])
     end
     subgraph agent["② 質問から回答を作成 ― エージェント方式（オプション）"]
         direction LR
-        U2(["利用者が質問を入力し<br/>「送信」を押す"]) --> F2["F app<br/>質問を受け取る"] --> G["G agent<br/>クエリ作成<br/>→ 検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答の作成"] --> R2(["画面に表示:<br/>回答<br/>参照した過去事例<br/>エージェントの動き"])
+        U2(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F2["F app<br/>質問を受け取る"] --> G["G agent<br/>クエリ作成<br/>→ 検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答の作成"] --> R2(["画面に表示:<br/>回答<br/>参照した過去事例<br/>エージェントの動き"])
     end
     subgraph ev["③ 検索と回答の精度を測る（コマンド）― 通常方式（既定）"]
         direction LR

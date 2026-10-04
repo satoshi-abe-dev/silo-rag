@@ -142,11 +142,11 @@ graph TB
     end
     subgraph plain["② Create an answer from the question: plain mode (default)"]
         direction LR
-        U1(["User types a question<br/>and presses Send"]) --> F1["F app<br/>receives the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer and<br/>cited past cases"])
+        U1(["User:<br/>types a question,<br/>presses Send"]) --> F1["F app<br/>takes the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer and<br/>cited past cases"])
     end
     subgraph agent["② Create an answer from the question: agent mode (optional)"]
         direction LR
-        U2(["User types a question<br/>and presses Send"]) --> F2["F app<br/>receives the question"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>writes the answer"] --> R2(["Shown on screen:<br/>the answer<br/>cited past cases<br/>the agent's actions"])
+        U2(["User:<br/>types a question,<br/>presses Send"]) --> F2["F app<br/>takes the question"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>writes the answer"] --> R2(["Shown on screen:<br/>the answer<br/>cited past cases<br/>the agent's actions"])
     end
     subgraph ev["③ Measure search and answer accuracy (command): plain mode (default)"]
         direction LR
