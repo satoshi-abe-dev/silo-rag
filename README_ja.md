@@ -125,19 +125,19 @@ streamlit run src/silo_rag/app.py
 ```mermaid
 %%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
 graph TB
-    subgraph prep["① データを用意する（1回だけ）"]
+    subgraph prep["① 準備（1回だけ）"]
         direction LR
         A["A datagen<br/>合成レポート"] --> B["B ingest<br/>取り込み"] --> DB[("検索用データ")]
     end
-    subgraph plain["② 質問に答える ― 通常方式（既定）"]
+    subgraph plain["② 質問に答える（質問のたび）― 通常方式（既定）"]
         direction LR
         F1["F app<br/>画面"] --> C1["C retrieval<br/>検索"] --> D1["D generation<br/>回答"]
     end
-    subgraph agent["② 質問に答える ― エージェント方式（オプション）"]
+    subgraph agent["② 質問に答える（質問のたび）― エージェント方式（オプション）"]
         direction LR
         F2["F app<br/>画面"] --> G["G agent<br/>クエリ作成<br/>→ C で検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答"]
     end
-    subgraph ev["③ 精度を測る（別の作業）"]
+    subgraph ev["③ 評価（別の作業）"]
         direction LR
         E["E eval<br/>評価"] --> CD["C・D を呼んで<br/>精度を測る"]
     end
@@ -146,11 +146,11 @@ graph TB
     agent ~~~ ev
 ```
 
-- **① データを用意する**: Aが合成レポートを作り、Bが取り込んで、検索用データ（ChromaDB）にする
+- **① 準備**: Aが合成レポートを作り、Bが取り込んで、検索用データ（ChromaDB）にする
 - **② 質問に答える**（質問のたびに動く。回答方式は、サイドバーで切り替える）
   - **通常方式**（既定）: FがC（検索）を呼び、その結果をD（回答の生成）に渡す
   - **エージェント方式**（オプション）: Fは、CとDを直接呼ぶ代わりに、Gを呼ぶ。Gが、クエリの作成・Cでの検索・判定・必要なら再検索を行い、最後にDで回答を作る。初期設定では、検索は1回で、判定と再検索は動かない
-- **③ 精度を測る**: Eが、C・Dを呼んで、検索精度と回答品質を測る。質問に答える流れとは、別の作業
+- **③ 評価**: Eが、C・Dを呼んで、検索精度と回答品質を測る。質問に答える流れとは、別の作業
 
 オプションのノードG・Hは、次のとおり。
 
