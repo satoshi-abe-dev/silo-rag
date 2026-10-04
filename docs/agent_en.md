@@ -46,7 +46,7 @@ How to read the diagram:
 
 ### Three kinds of "query" processing
 
-The names are similar, so keep them apart.
+The names are similar, so the table below tells them apart.
 
 | | Processing | Where | When it runs |
 | --- | --- | --- | --- |
