@@ -122,10 +122,9 @@ streamlit run src/silo_rag/app.py
 > **If you just want to run it, this is enough.**
 > The rest covers the design and the development process. Read only what interests you.
 >
-> - What it looks like: [Screenshots](#screenshots)
 > - How the system is organized: [Architecture](#architecture)
 > - How one question becomes an answer: [Worked example](#worked-example-how-one-question-becomes-an-answer)
-> - The agent's design and measured results: [Node G](#node-g-the-langgraph-agent) and [Node H](#node-h-langchain-integration)
+> - The agent's design and measured results: [Node G](#node-g-the-langgraph-agent) and [Node H](#node-h-langchain-integration) (the detailed tables are in the [evaluation details](docs/agent_evaluation_en.md))
 > - How it was developed: [Development process](#development-process-graph-engineering--independent-review)
 
 ---
