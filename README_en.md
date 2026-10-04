@@ -2,7 +2,7 @@
 
 [日本語](README_ja.md) | English
 
-**A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.**
+**A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.** Technical terms are explained in the [glossary](#glossary).
 
 > 🧭 **The requirements are the author's own. Most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author.**
 >
@@ -26,7 +26,7 @@ The "answer mode" in the sidebar switches between the plain mode and the agent m
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/gui_plain.png" alt="The plain mode: with the sidebar set to the plain mode, a question returns an answer and the past cases it drew on"><br><b>Plain mode</b>: searches the documents with the question as typed. The answer and the past cases it drew on (citations) appear</td>
+<td width="50%"><img src="docs/screenshots/gui_plain.png" alt="The plain mode: with the sidebar set to the plain mode, a question returns an answer, the past cases it drew on, and a record of the search"><br><b>Plain mode</b>: searches the documents with the question as typed. The answer and the citations appear, plus a record of the search</td>
 <td width="50%"><img src="docs/screenshots/gui_agent.png" alt="The agent mode: under the answer, a 'what the agent did' record (query writing, search, grading, answer generation)"><br><b>Agent mode</b> (optional): rewrites the question into search terms, then searches the documents. The answer and the citations appear, plus a record of what the agent did</td>
 </tr>
 </table>
@@ -131,7 +131,7 @@ The sidebar (settings) is on the left; the questions and answers are on the righ
 - **Read the answer**: under the answer, "参照した過去事例" (cited past cases) lists the sources as "report ID / section / department". Open one to see the text the answer was based on. If a similar case exists in another department, the answer includes it and says it is from another department
 - **When there is no answer**: if the material has nothing to do with the question, or the input is not a search question (small talk, greetings and so on), it answers "該当する事例が見つかりませんでした" (no matching case found). Questions about counts or totals ("how many in all?", "which is the most common?") get "分かりません" (I don't know), because it only sees the part of the material that the search found
 - **Ask follow-up questions**: questions that build on the previous one (e.g., "tell me more about that") work. In that case, words such as "that" are first turned into concrete words using the conversation history, then the documents are searched (in both modes). The conversation history is used only to interpret search questions (it does not answer "what did I just say?"). Reloading the browser clears the history
-- **Answer mode (sidebar)**: switch between "通常" (plain: searches the documents with the question as typed) and "エージェント" (agent: rewrites the question into search terms, then searches the documents), question by question. Each option also shows this description under it on the screen. "エージェント" appears only after you install the extra libraries in step 4. When the agent answers, "エージェントの動き" (what the agent did: query writing, searching, grading) also appears under the answer
+- **Answer mode (sidebar)**: switch between "通常" (plain: searches the documents with the question as typed) and "エージェント" (agent: rewrites the question into search terms, then searches the documents), question by question. Each option also shows this description under it on the screen. "エージェント" appears only after you install the extra libraries in step 4. A record of the steps also appears under the answer: in plain mode "検索の動き" (the search terms used, the candidate counts, the reranking), and in agent mode "エージェントの動き" (query writing, searching, grading)
 - **Filters (optional, sidebar)**: narrow the search by "作成部署" (department) and "プロジェクト種別" (project type). Without them, it searches across all departments (with your own reports the categories may not match; see the caution in step 1 B)
 
 ### Step 4 (optional): Install the agent mode
@@ -155,6 +155,7 @@ Once installed, "エージェント" (agent) appears under "answer mode" in the 
 > - How the whole system works: [Architecture](#architecture)
 > - The agent mode and its results: [The agent mode (nodes G and H)](#the-agent-mode-nodes-g-and-h)
 > - How it was developed: [How it was developed](#how-it-was-developed)
+> - What the terms mean: [Glossary](#glossary)
 > - More detailed documents: [Further reading](#further-reading)
 
 ---
@@ -177,7 +178,7 @@ graph TB
         direction TB
         subgraph plain["Plain mode (default)"]
             direction LR
-            U1(["User:<br/>types a question,<br/>presses Send"]) --> F1["F app<br/>takes the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer and<br/>cited past cases"])
+            U1(["User:<br/>types a question,<br/>presses Send"]) --> F1["F app<br/>takes the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer<br/>cited past cases<br/>the search record"])
         end
         subgraph agent["Agent mode (optional)"]
             direction LR
@@ -245,6 +246,8 @@ graph TB
 - **Making words like "that" concrete, and writing the answer**: the chat LLM
 - **Turning images in the reports into text** (at ingestion): the model that can read images (VLM)
 
+**The search data (ChromaDB)**: ChromaDB is a database component that runs on your own computer (a vector database, which can find entries by how close their lists of numbers are). B (ingestion) stores the report text split by heading (chunks), details such as the department, and the lists of numbers made by the embedding model, in `data/chroma_db/`. When searching, semantic search finds entries by how close those numbers are, and keyword search (BM25) scores the stored text. Nothing is sent to an outside server, and the folder is not tracked by git.
+
 The AI models each node uses, and how the search works (BM25 keyword search and vector search, which looks for meaning), are in [how it works](docs/architecture_en.md). A [worked example](docs/worked_example_en.md) follows one question all the way to an answer with real values.
 
 ## The agent mode (nodes G and H)
@@ -263,6 +266,38 @@ The AI models each node uses, and how the search works (BM25 keyword search and 
 - **Tests**: dependencies can be swapped for fakes, so every node can be tested on its own without a real LLM
 
 See [how it was developed](docs/development_process_en.md).
+
+## Glossary
+
+Technical terms used in this README.
+
+| Term | Meaning |
+| --- | --- |
+| RAG (retrieval-augmented generation) | Searching for documents related to a question and having AI write the answer from what it finds |
+| LLM (large language model) | AI that reads and writes text. Here it rewrites questions into search terms, reranks candidates and writes answers, among other things |
+| Local LLM | An LLM run on your own computer instead of an outside service. Data does not leave the computer |
+| VLM | An AI model that can also read images. Used to turn charts and other images in the reports into text |
+| Embedding | Turning a sentence into a list of numbers (a vector) that represents its meaning. Sentences with close meanings get close lists of numbers |
+| Semantic search (vector search) | Finding documents with close meanings by how close their embeddings are. Handles paraphrases well |
+| BM25 (keyword search) | A formula that scores a document by how its words match the question. It is not an AI model |
+| Hybrid search | Search that combines keyword search and semantic search |
+| Chunk | A piece of a report split by heading; the unit that search works on |
+| ChromaDB | A vector database that runs on your own computer. It stores the chunks and their embeddings |
+| Search query (search terms) | The words used to search. In agent mode they are written from the question |
+| Agent | Instead of running a fixed procedure once, AI looks at intermediate results and decides what to do next. Here it can look at the search results and decide whether to search again |
+| LangGraph / LangChain | Libraries for building applications that use AI. LangGraph builds the flow of steps; LangChain provides components such as a ready-made agent |
+| Node | A unit of work in this project (A to H), one file each |
+| DAG | A diagram whose arrows have a direction and never loop back to where they started. Here it shows how the nodes depend on each other |
+| Graph engineering | A way of developing in which the work is split into nodes and designed as a DAG of their dependencies |
+| hit_rate | The share of questions whose correct document is in the search results (top 5). Used to measure accuracy |
+| 7B / 32B | The size of an AI model (number of parameters: 7 billion and 32 billion). Larger models tend to perform better but take longer |
+| Streamlit | A Python library for building pages that open in a browser. Used for this project's screen |
+| Virtual environment (.venv) | A place that holds Python and the libraries for this project only, so other projects are not affected |
+| LM Studio / Ollama | Software that runs AI models on your own computer |
+| Claude Code | Anthropic's AI tool for writing and fixing code. It did most of this project's implementation |
+| codex CLI | OpenAI's AI tool for working with code. Here it reviewed Claude Code's work as AI from a different company |
+| Subagent | Another AI worker that Claude Code starts to hand off part of its work |
+| Co-Authored-By | A way of recording a collaborator in a git commit |
 
 ## Further reading
 

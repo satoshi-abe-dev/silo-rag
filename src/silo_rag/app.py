@@ -1,7 +1,7 @@
 """Node F: Streamlit UI (chat plus cited past cases).
 
 The first layer that combines search() and answer_question(), which are independent in the DAG.
-Agent mode uses run_agent() (node G) instead and shows the agent's trace under the answer.
+Agent mode uses run_agent() (node G) instead. Both modes show a record of the steps under the answer.
 
 Run: streamlit run src/silo_rag/app.py --server.address localhost
 (Without --server.address localhost, other machines on the network can open it.)
@@ -63,10 +63,10 @@ def _mode_widget() -> str:
     )
 
 
-def _render_trace(trace: list[str] | None) -> None:
+def _render_trace(title: str, trace: list[str] | None) -> None:
     if not trace:
         return
-    with st.expander("エージェントの動き"):
+    with st.expander(title):
         for line in trace:
             st.text(line)
 
@@ -105,12 +105,12 @@ def main() -> None:
     if "history" not in st.session_state:
         st.session_state.history = []
 
-    for question, answer, scored, past_trace in st.session_state.history:
+    for question, answer, scored, trace_title, past_trace in st.session_state.history:
         with st.chat_message("user"):
             st.write(question)
         with st.chat_message("assistant"):
             st.write(answer.text)
-            _render_trace(past_trace)
+            _render_trace(trace_title, past_trace)
             _render_citations(answer, scored)
 
     # st.chat_input submits on Enter, including the Enter that confirms IME conversion.
@@ -132,9 +132,9 @@ def main() -> None:
         st.write(question)
 
     # History lets both retrieval and generation resolve follow-up references.
-    history = [(q, a.text) for q, a, _, _ in st.session_state.history] or None
+    history = [(q, a.text) for q, a, _, _, _ in st.session_state.history] or None
 
-    trace: list[str] | None = None
+    trace: list[str] = []
     with st.spinner("検索・回答生成中..."):
         try:
             if mode == _MODE_AGENT:
@@ -142,16 +142,19 @@ def main() -> None:
 
                 result = run_agent(client, question, filters=filters or None, history=history)
                 answer, scored, trace = result.answer, result.scored_chunks, result.trace
+                trace_title = "エージェントの動き"
             else:
-                scored = search(client, question, filters=filters or None, history=history)
+                scored = search(client, question, filters=filters or None, history=history, trace=trace)
                 answer = answer_question(client, question, [sc.chunk for sc in scored], history=history)
+                trace.append("回答生成")
+                trace_title = "検索の動き"
         except RuntimeError as exc:
             # Setup errors (e.g. no ChromaDB collection because ingest wasn't run);
             # LLMConnectionError is also a RuntimeError, so it's shown here too.
             st.error(str(exc))
             return
 
-    st.session_state.history.append((question, answer, scored, trace))
+    st.session_state.history.append((question, answer, scored, trace_title, trace))
     st.rerun()
 
 
