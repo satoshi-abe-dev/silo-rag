@@ -160,8 +160,11 @@ pip install -e ".[langchain]"    # LangChain連携（ノードH）。langgraph�
 %%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}, "themeVariables": {"lineColor": "#57606a"}}}%%
 graph TB
     subgraph g1["① 準備（導入時に、コマンドで1回だけ）"]
-        direction LR
-        A["A datagen<br/>合成レポート"] --> B["B ingest<br/>取り込み"] --> DB[("検索用データ")]
+        direction TB
+        subgraph prep["デモデータの場合（自前のレポートは、Bだけ）"]
+            direction LR
+            A["A datagen<br/>合成レポート"] --> B["B ingest<br/>取り込み"] --> DB[("検索用データ")]
+        end
     end
     subgraph g2["② 質問から回答を作成（利用者が、画面で使う）"]
         direction TB
@@ -193,6 +196,7 @@ graph TB
     style g1 fill:#e7f0ff,stroke:#3b6fd4,color:#1f2328
     style g2 fill:#e6f6e8,stroke:#2f9e44,color:#1f2328
     style g3 fill:#fff1de,stroke:#d9822b,color:#1f2328
+    style prep fill:#ffffff,stroke:#8c959f,color:#1f2328
     style plain fill:#ffffff,stroke:#8c959f,color:#1f2328
     style agent fill:#ffffff,stroke:#8c959f,color:#1f2328
     style ev fill:#ffffff,stroke:#8c959f,color:#1f2328
