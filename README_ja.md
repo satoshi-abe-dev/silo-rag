@@ -154,8 +154,8 @@ graph TB
 
 オプションのノードG・Hは、次のとおり。
 
-- **G**（`agent.py`）: C・Dの関数（`search`・`rerank`・`answer_question`）を呼ぶ。E（`--pipeline agent`）とF（回答方式「エージェント」）が、選ばれたときだけ呼ぶ
-- **H**（`langchain_adapter.py`）: Cの`search`と、Dの`Answer`・`build_citations`を呼ぶ。Eが`--pipeline langchain`のときだけ呼ぶ
+- **G**（`agent.py`）: C・Dの関数（`search`・`rerank`・`answer_question`）を呼ぶ。Gが呼ばれるのは、E（`--pipeline agent`）またはF（回答方式「エージェント」）で選ばれたときだけ
+- **H**（`langchain_adapter.py`）: Cの`search`と、Dの`Answer`・`build_citations`を呼ぶ。Hが呼ばれるのは、Eで`--pipeline langchain`を指定したときだけ
 - どちらも、使うときだけ`import`する。LangGraph・LangChainが入っていなくても、通常方式は動く
 
 | ノード | モジュール | 役割 | 使用モデル（`config.toml`の`[ai]`） |

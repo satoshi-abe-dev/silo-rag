@@ -154,8 +154,8 @@ graph TB
 
 The optional nodes G and H, in detail:
 
-- **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). E (`--pipeline agent`) and F (the "agent" answer mode) call it only when selected
-- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `build_citations`. E calls it only with `--pipeline langchain`
+- **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). G is called only when it is selected in E (`--pipeline agent`) or F (the "agent" answer mode)
+- **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `build_citations`. H is called only when E is run with `--pipeline langchain`
 - Both are imported only when used. Plain mode works without LangGraph or LangChain installed
 
 | Node | Module | Role | Model used (`[ai]` in `config.toml`) |
