@@ -148,7 +148,7 @@ graph TB
         direction LR
         F2["F app<br/>UI"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>answer"]
     end
-    subgraph ev["③ Evaluation (separate task)"]
+    subgraph ev["③ Evaluation (when measuring search and answer accuracy)"]
         direction LR
         E["E eval<br/>evaluate"] --> CD["calls C's and D's<br/>functions to measure<br/>accuracy"]
         E -->|"--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper<br/>(evaluation only)"] --> CD
@@ -162,7 +162,7 @@ graph TB
 - **② Create an answer from the question** (the answer mode is switched in the sidebar)
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run
-- **③ Evaluation**: E calls C's search function and D's answer-generation function to measure retrieval accuracy and answer quality. It is a separate task from answering questions. Only with `--pipeline langchain` does E go through H to call the functions of C and D (H cannot be used from the UI)
+- **③ Evaluation**: the developer runs it from the command line, on questions whose correct answers are known, when measuring the accuracy of search and of answers (it is not part of the flow that answers a question). E calls C's search function and D's answer-generation function to measure it. Only with `--pipeline langchain` does E go through H to call the functions of C and D (H cannot be used from the UI)
 
 The optional nodes G and H, in detail:
 
