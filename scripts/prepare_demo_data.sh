@@ -15,4 +15,4 @@ python -m silo_rag.eval
 
 echo
 echo "準備完了。次のコマンドでUIを起動できます:"
-echo "  streamlit run src/silo_rag/app.py"
+echo "  streamlit run src/silo_rag/app.py --server.address localhost"

@@ -105,8 +105,10 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 Run it after step 1. It opens a chat-style page in your browser (what it looks like is in [Screenshots](#screenshots)), and you type your questions there. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
 
 ```bash
-streamlit run src/silo_rag/app.py
+streamlit run src/silo_rag/app.py --server.address localhost
 ```
+
+`--server.address localhost` makes the page reachable only from the browser on this computer. Without it, the page can also be opened from other devices on the same network.
 
 ### Step 3 (optional): Use the agent mode
 

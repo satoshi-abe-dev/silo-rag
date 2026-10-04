@@ -6,7 +6,8 @@ retrieval.search() と generation.answer_question() をこの層で初めて組�
 サイドバーで「エージェント」を選ぶと、代わりに agent.run_agent()（LangGraph、DAGノードG）で回答し、
 エージェントが何をしたか（クエリ作成・検索・判定・書き直しの記録）を回答の下に表示する。
 
-起動方法: streamlit run src/silo_rag/app.py
+起動方法: streamlit run src/silo_rag/app.py --server.address localhost
+（--server.address localhost を付けないと、同じネットワークの他の機器からも開ける状態になる）
 （`streamlit run` はファイルを直接実行するため、他モジュールのような相対import
 （`from .config import ...`）ではなく絶対import（`from silo_rag.config import ...`）を使う。
 `pip install -e .` 済みであれば、cwdによらず絶対importで解決できる。）
