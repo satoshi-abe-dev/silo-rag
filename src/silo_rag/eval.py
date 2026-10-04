@@ -334,7 +334,8 @@ def _default_result_name(
 ) -> str:
     """--outを省略したときの結果ファイル名。条件が違う実行が上書きし合わないよう、上限回数も入れる。"""
     if pipeline == "baseline":
-        # 書き直しをオンにした実行が、通常の結果（eval_results.json）を上書きしないようにする。
+        # 検索クエリの作成（rewrite_query）をオンにした実行が、
+        # 通常の結果（eval_results.json）を上書きしないようにする。
         return "eval_results_baseline_rewrite.json" if rewrite_query else "eval_results.json"
     if pipeline == "langchain":
         return f"eval_results_langchain_max{max_attempts}.json"
