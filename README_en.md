@@ -111,28 +111,41 @@ streamlit run src/silo_rag/app.py
 > **If you just want to run it, this is enough.**
 > The rest covers the design and the development process. Read only what interests you.
 >
-> - How the system is organized: [Architecture (DAG)](#architecture-dag)
+> - How the system is organized: [Architecture](#architecture)
 > - How one question becomes an answer: [Worked example](#worked-example-how-one-question-becomes-an-answer)
 > - How it was developed: [Development process](#development-process-graph-engineering--independent-review)
 > - The agent's design and measured results: [Node G](#node-g-the-langgraph-agent) and [Node H](#node-h-langchain-integration)
 
 ---
 
-## Architecture (DAG)
+## Architecture
 
-The pipeline is designed as a DAG (directed acyclic graph) with clear dependencies between modules.
+The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times.
 
 ```mermaid
-graph LR
-    A["A datagen<br/>synthetic data"] --> B["B ingest<br/>chunking, embedding"]
-    B --> C["C retrieval<br/>search, reranking"]
-    B --> D["D generation<br/>cited answers"]
-    C --> E["E eval<br/>accuracy, quality"]
-    D --> E
-    E --> F["F app<br/>Streamlit UI"]
+graph TB
+    subgraph prep["① Preparation (once)"]
+        direction LR
+        A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
+    end
+    subgraph ask["② Every question"]
+        direction LR
+        F["F app<br/>UI"] --> C["C retrieval<br/>search"] --> D["D generation<br/>answer"]
+    end
+    subgraph ev["③ Evaluation (separate task)"]
+        direction LR
+        E["E eval<br/>evaluate"] --> CD["calls C and D<br/>to measure accuracy"]
+    end
+    prep ~~~ ask
+    ask ~~~ ev
 ```
 
-The optional nodes G and H sit outside the main flow, so they are not in the diagram.
+- **① Preparation**: A makes the synthetic reports, and B loads them into the search data (ChromaDB)
+- **② Every question**: when a user asks in the UI (F), F calls C (search) and hands the result to D (answer generation)
+- **③ Evaluation**: E calls C and D to measure retrieval accuracy and answer quality. It is a separate task from answering questions
+- With the **agent mode** (optional), in ② F calls G instead of calling C and D directly. G calls C and D while writing queries, grading, and searching again
+
+The optional nodes G and H, in detail:
 
 - **G** (`agent.py`): calls functions from C and D (`search`, `rerank`, `answer_question`). E (`--pipeline agent`) and F (the "agent" answer mode) call it only when selected
 - **H** (`langchain_adapter.py`): calls C's `search` and D's `Answer` and `build_citations`. E calls it only with `--pipeline langchain`
@@ -150,22 +163,6 @@ The optional nodes G and H sit outside the main flow, so they are not in the dia
 | H (optional) | `src/silo_rag/langchain_adapter.py` | - Exposes the existing search as a LangChain Retriever<br>- Comparison against LangChain's stock agent<br>- Details: [Node H](#node-h-langchain-integration) | Every model used by C and D |
 
 If `vlm_model` isn't loaded, only B's image captioning is skipped (a warning is logged).
-
-### How the nodes relate
-
-- **Node**: a unit of work with a clear input/output boundary. Nodes A–F each correspond to one file. Internals stay hidden; only entry points such as `search()` and `answer_question()` are exposed
-- **Connections**
-  - A → B: through files (`data/synth_reports/`). Zero import coupling
-  - B → C/D: through ChromaDB. They import only the `Chunk` type
-  - C/D → E/F: direct function calls
-- **The only independent pair is C and D.** Both depend on B, not on each other. Every other pair has a dependency and has to wait for it, so they can't be built in parallel. **C and D were actually implemented in parallel by two Agents**
-- "Acyclic" only guarantees a valid build order exists; it's separate from independence. A single straight chain (A→B→C→D→E→F) is acyclic yet offers zero parallelism. The payoff here came from the graph's shape: no arrow happens to connect C and D
-
-> ⚠️ **"Parallel" here means parallel development (writing the code), not parallel execution at runtime.**
->
-> - The DAG's arrows show which module depends on which; they are not the runtime order of operations
-> - At runtime, each question runs C (retrieval) and then D (generation), one after the other. D takes the chunks C returned as its input, handed over by E/F
-> - Because C and D don't depend on each other, two Agents **could write them at the same time**; that is all the claim means
 
 ### Terms: BM25 and vector search
 
@@ -194,6 +191,33 @@ The requirement to "bring graph engineering into the development process" (see �
 - **Bug localization**: after each node, an independent review by the local `codex` CLI (a different vendor's AI) was a required gate; findings were fixed and re-reviewed before moving on. It caught `BM25Okapi`'s negative-IDF bug in `retrieval.py` and a data leak in `datagen.py`'s evaluation-QA generation (kept as a regression test in `tests/test_datagen.py`)
 - **Reusability**: since each node is independent, rewriting one later doesn't touch the others
 - Being able to decide a build order isn't unique to graph engineering. What paid off was "the part that can be parallelized (C and D)" and "boundaries narrow enough to review in isolation"
+
+### Node dependencies (DAG)
+
+The pipeline is designed as a DAG (directed acyclic graph) with clear dependencies between nodes. **This diagram is not the runtime flow; it is a design map of "which node uses the results of which node".** I used it during development to decide the build order and which parts could be built in parallel.
+
+```mermaid
+graph LR
+    A["A datagen<br/>synthetic reports"] -->|files| B["B ingest<br/>load"]
+    B -->|database| cd
+    subgraph cd["C and D (independent of each other)"]
+        C["C retrieval<br/>search"]
+        D["D generation<br/>answer"]
+    end
+    cd -->|calls functions| E["E eval<br/>evaluate"]
+    cd -->|calls functions| F["F app<br/>UI"]
+```
+
+- **Connections**: A to B goes through files (`data/synth_reports/`; zero import coupling). B to C/D goes through ChromaDB (they import only the `Chunk` type). E and F call C's and D's functions directly (there is no dependency between E and F; F also uses A's constants `DEPARTMENTS` and `PROJECT_TYPES`)
+- Each node hides its internals; only entry points such as `search()` and `answer_question()` are exposed
+- **The only independent pair is C and D.** Both depend on B, not on each other. Every other pair has a dependency and has to wait for it, so they can't be built in parallel. **C and D were actually implemented in parallel by two Agents**
+- "Acyclic" only guarantees a valid build order exists; it's separate from independence. A single straight chain (A→B→C→D→E→F) is acyclic yet offers zero parallelism. The payoff here came from the graph's shape: no arrow happens to connect C and D
+
+> ⚠️ **"Parallel" here means parallel development (writing the code), not parallel execution at runtime.**
+>
+> - The DAG's arrows show which module depends on which; they are not the runtime order of operations
+> - At runtime, each question runs C (retrieval) and then D (generation), one after the other. D takes the chunks C returned as its input, handed over by E/F
+> - Because C and D don't depend on each other, two Agents **could write them at the same time**; that is all the claim means
 
 ## Node G: the LangGraph agent
 
