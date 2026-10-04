@@ -143,7 +143,7 @@ pip install -e ".[langchain]"    # LangChain連携（ノードH）。langgraph�
 システムは、6つの**ノード**（処理のまとまり。A〜Fが、それぞれ1ファイル）でできている。動く時期と、使う人は、3つに分かれる。**利用者が使うのは、②だけ**（画面で質問する）。①は、導入する人が、最初にコマンドで1回だけ実行する準備。③は、開発者だけが使う、精度の測定。質問に答える流れ（②）は、**画面のサイドバーの「回答方式」で、通常方式とエージェント方式を切り替えられる**。
 
 ```mermaid
-%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}, "themeVariables": {"lineColor": "#57606a"}}}%%
 graph TB
     subgraph g1["① 準備（導入時に、コマンドで1回だけ）"]
         direction LR

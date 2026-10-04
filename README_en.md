@@ -143,7 +143,7 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times and are used by different people. **End users use only ②** (asking questions on the screen). ① is a one-time preparation that whoever installs the system runs from the command line. ③ is a measurement that only developers use. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
 
 ```mermaid
-%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}, "themeVariables": {"lineColor": "#57606a"}}}%%
 graph TB
     subgraph g1["① Preparation (at install time, a command, once only)"]
         direction LR
