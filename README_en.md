@@ -17,7 +17,7 @@
 ## Background and problem
 
 - **Problem**: when starting a new project, you want to find similar past work, but each department uses its own terms and document formats, so other departments' lessons get buried
-- **Solution**: as long as documents are kept in the right place, the assistant searches across departments and answers with citations, even when sharing between departments is imperfect
+- **Solution**: once each department's documents are loaded into the assistant, it searches across departments and answers with citations, even when sharing between departments is imperfect
 - **The data is synthetic**: 60 retrospective reports for five generic business departments (marketing / sales / product development / customer support / corporate planning), written by an LLM. Five file formats are mixed: Markdown, Word, Excel, PowerPoint and PDF. Images inside the reports (such as KPI trend charts) are turned into text by an AI that can read images (a VLM), so they can be searched too
 
 ## Screenshots
