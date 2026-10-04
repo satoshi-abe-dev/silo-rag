@@ -124,7 +124,7 @@ streamlit run src/silo_rag/app.py --server.address localhost
 
 ### Step 3: Ask questions on the screen
 
-The sidebar (settings) is on the left; the questions and answers are on the right. The UI is in Japanese; the labels are quoted with an English gloss.
+The sidebar (settings) is on the left; the questions and answers are on the right (see the [Screenshots](#screenshots) for what it looks like). The UI is in Japanese; the labels are quoted with an English gloss.
 
 - **Ask**: type a question in the text box at the bottom and press the "送信" (Send) button. The Enter key adds a new line and does not send (so that confirming Japanese input conversion does not send by mistake). While it works, "検索・回答生成中..." (searching and generating) is shown
 - **Read the answer**: under the answer, "参照した過去事例" (cited past cases) lists the sources as "report ID / section / department". Open one to see the text the answer was based on. If a similar case exists in another department, the answer includes it and says it is from another department
