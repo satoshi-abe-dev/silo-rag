@@ -143,33 +143,46 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times and are used by different people. **End users use only ②** (asking questions on the browser page launched in step 2; see [Screenshots](#screenshots)). ① is a one-time preparation that whoever installs the system runs from the command line. ③ is a measurement that only developers use. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
 
 ```mermaid
-%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}, "themeVariables": {"lineColor": "#57606a"}}}%%
 graph TB
-    subgraph prep["① Preparation (at install time, a command, once only)"]
+    subgraph g1["① Preparation (at install time, a command, once only)"]
         direction LR
         A["A datagen<br/>synthetic reports"] --> B["B ingest<br/>load"] --> DB[("search data")]
     end
-    subgraph plain["② Create an answer from the question: plain mode (default)"]
-        direction LR
-        U1(["User:<br/>types a question,<br/>presses Send"]) --> F1["F app<br/>takes the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer and<br/>cited past cases"])
+    subgraph g2["② Create an answer from the question (end users, on the screen)"]
+        direction TB
+        subgraph plain["Plain mode (default)"]
+            direction LR
+            U1(["User:<br/>types a question,<br/>presses Send"]) --> F1["F app<br/>takes the question"] --> C1["C retrieval<br/>search"] --> D1["D generation<br/>writes the answer"] --> R1(["Shown on screen:<br/>the answer and<br/>cited past cases"])
+        end
+        subgraph agent["Agent mode (optional)"]
+            direction LR
+            U2(["User:<br/>types a question,<br/>presses Send"]) --> F2["F app<br/>takes the question"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>writes the answer"] --> R2(["Shown on screen:<br/>the answer<br/>cited past cases<br/>the agent's actions"])
+        end
+        plain ~~~ agent
     end
-    subgraph agent["② Create an answer from the question: agent mode (optional)"]
-        direction LR
-        U2(["User:<br/>types a question,<br/>presses Send"]) --> F2["F app<br/>takes the question"] --> G["G agent<br/>write query<br/>→ search<br/>→ grade<br/>→ search again<br/>(if needed)"] --> D2["D generation<br/>writes the answer"] --> R2(["Shown on screen:<br/>the answer<br/>cited past cases<br/>the agent's actions"])
+    subgraph g3["③ Measure search and answer accuracy (for developers, a command)"]
+        direction TB
+        subgraph ev["Plain mode (default)"]
+            direction LR
+            E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]
+        end
+        subgraph ev2["Using G or H (optional)"]
+            direction LR
+            E2["E eval<br/>evaluate"] -->|"set on the command line<br/>--pipeline agent"| G2["G agent<br/>agent mode"] --> CD2["calls C's and D's<br/>functions to measure<br/>accuracy"]
+            E2 -->|"set on the command line<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD2
+        end
+        ev ~~~ ev2
     end
-    subgraph ev["③ For developers: measure search and answer accuracy (command): plain mode (default)"]
-        direction LR
-        E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]
-    end
-    subgraph ev2["③ For developers: measure search and answer accuracy: using G or H (optional)"]
-        direction LR
-        E2["E eval<br/>evaluate"] -->|"set on the command line<br/>--pipeline agent"| G2["G agent<br/>agent mode"] --> CD2["calls C's and D's<br/>functions to measure<br/>accuracy"]
-        E2 -->|"set on the command line<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD2
-    end
-    prep ~~~ plain
-    plain ~~~ agent
-    agent ~~~ ev
-    ev ~~~ ev2
+    g1 ~~~ g2
+    g2 ~~~ g3
+    style g1 fill:#e7f0ff,stroke:#3b6fd4,color:#1f2328
+    style g2 fill:#e6f6e8,stroke:#2f9e44,color:#1f2328
+    style g3 fill:#fff1de,stroke:#d9822b,color:#1f2328
+    style plain fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style agent fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style ev fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style ev2 fill:#ffffff,stroke:#8c959f,color:#1f2328
 ```
 
 - **① Preparation** (whoever installs the system runs it once from the command line): A makes the synthetic reports, and B loads them into the search data (ChromaDB)

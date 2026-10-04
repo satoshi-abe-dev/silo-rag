@@ -143,33 +143,46 @@ pip install -e ".[langchain]"    # LangChain連携（ノードH）。langgraph�
 システムは、6つの**ノード**（処理のまとまり。A〜Fが、それぞれ1ファイル）でできている。動く時期と、使う人は、3つに分かれる。**利用者が使うのは、②だけ**（手順2で起動するブラウザの画面で、質問する。見た目は[画面](#画面)）。①は、導入する人が、最初にコマンドで1回だけ実行する準備。③は、開発者だけが使う、精度の測定。質問に答える流れ（②）は、**画面のサイドバーの「回答方式」で、通常方式とエージェント方式を切り替えられる**。
 
 ```mermaid
-%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
+%%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}, "themeVariables": {"lineColor": "#57606a"}}}%%
 graph TB
-    subgraph prep["① 準備（導入時に、コマンドで1回だけ）"]
+    subgraph g1["① 準備（導入時に、コマンドで1回だけ）"]
         direction LR
         A["A datagen<br/>合成レポート"] --> B["B ingest<br/>取り込み"] --> DB[("検索用データ")]
     end
-    subgraph plain["② 質問から回答を作成 ― 通常方式（既定）"]
-        direction LR
-        U1(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F1["F app<br/>質問を受け取る"] --> C1["C retrieval<br/>検索"] --> D1["D generation<br/>回答の作成"] --> R1(["画面に表示:<br/>回答と<br/>参照した過去事例"])
+    subgraph g2["② 質問から回答を作成（利用者が、画面で使う）"]
+        direction TB
+        subgraph plain["通常方式（既定）"]
+            direction LR
+            U1(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F1["F app<br/>質問を受け取る"] --> C1["C retrieval<br/>検索"] --> D1["D generation<br/>回答の作成"] --> R1(["画面に表示:<br/>回答と<br/>参照した過去事例"])
+        end
+        subgraph agent["エージェント方式（オプション）"]
+            direction LR
+            U2(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F2["F app<br/>質問を受け取る"] --> G["G agent<br/>クエリ作成<br/>→ 検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答の作成"] --> R2(["画面に表示:<br/>回答<br/>参照した過去事例<br/>エージェントの動き"])
+        end
+        plain ~~~ agent
     end
-    subgraph agent["② 質問から回答を作成 ― エージェント方式（オプション）"]
-        direction LR
-        U2(["利用者:<br/>質問を入力し<br/>「送信」を押す"]) --> F2["F app<br/>質問を受け取る"] --> G["G agent<br/>クエリ作成<br/>→ 検索<br/>→ 判定<br/>→ 必要なら再検索"] --> D2["D generation<br/>回答の作成"] --> R2(["画面に表示:<br/>回答<br/>参照した過去事例<br/>エージェントの動き"])
+    subgraph g3["③ 検索と回答の精度を測る（開発用・コマンド）"]
+        direction TB
+        subgraph ev["通常方式（既定）"]
+            direction LR
+            E1["E eval<br/>評価"] --> CD1["C・D の機能を呼んで<br/>精度を測る"]
+        end
+        subgraph ev2["G・Hを使う（オプション）"]
+            direction LR
+            E2["E eval<br/>評価"] -->|"コマンドで指定<br/>--pipeline agent"| G2["G agent<br/>エージェント方式"] --> CD2["C・D の機能を呼んで<br/>精度を測る"]
+            E2 -->|"コマンドで指定<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携"] --> CD2
+        end
+        ev ~~~ ev2
     end
-    subgraph ev["③ 開発用: 検索と回答の精度を測る（コマンド）― 通常方式（既定）"]
-        direction LR
-        E1["E eval<br/>評価"] --> CD1["C・D の機能を呼んで<br/>精度を測る"]
-    end
-    subgraph ev2["③ 開発用: 検索と回答の精度を測る ― G・Hを使う（オプション）"]
-        direction LR
-        E2["E eval<br/>評価"] -->|"コマンドで指定<br/>--pipeline agent"| G2["G agent<br/>エージェント方式"] --> CD2["C・D の機能を呼んで<br/>精度を測る"]
-        E2 -->|"コマンドで指定<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携"] --> CD2
-    end
-    prep ~~~ plain
-    plain ~~~ agent
-    agent ~~~ ev
-    ev ~~~ ev2
+    g1 ~~~ g2
+    g2 ~~~ g3
+    style g1 fill:#e7f0ff,stroke:#3b6fd4,color:#1f2328
+    style g2 fill:#e6f6e8,stroke:#2f9e44,color:#1f2328
+    style g3 fill:#fff1de,stroke:#d9822b,color:#1f2328
+    style plain fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style agent fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style ev fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style ev2 fill:#ffffff,stroke:#8c959f,color:#1f2328
 ```
 
 - **① 準備**（導入する人が、最初にコマンドで1回だけ実行する）: Aが合成レポートを作り、Bが取り込んで、検索用データ（ChromaDB）にする
