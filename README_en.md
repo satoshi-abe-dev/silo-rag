@@ -102,7 +102,7 @@ python -m silo_rag.ingest --reports-dir <directory containing your reports>
 
 ### Step 2: Launch the UI
 
-Run it after step 1. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
+Run it after step 1. It opens a chat-style page in your browser (what it looks like is in [Screenshots](#screenshots)), and you type your questions there. It's a foreground process that keeps a browser tab open, so run it separately from data preparation.
 
 ```bash
 streamlit run src/silo_rag/app.py
@@ -140,7 +140,7 @@ pip install -e ".[langchain]"    # LangChain integration (node H); also installs
 
 ## Architecture
 
-The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times and are used by different people. **End users use only ②** (asking questions on the screen). ① is a one-time preparation that whoever installs the system runs from the command line. ③ is a measurement that only developers use. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
+The system is made of six **nodes** (units of work; A to F each correspond to one file). They run at three different times and are used by different people. **End users use only ②** (asking questions on the browser page launched in step 2; see [Screenshots](#screenshots)). ① is a one-time preparation that whoever installs the system runs from the command line. ③ is a measurement that only developers use. How a question is answered (②) can be **switched between the plain mode and the agent mode with the "answer mode" selector in the UI sidebar**.
 
 ```mermaid
 %%{init: {"flowchart": {"padding": 24, "wrappingWidth": 400}}}%%
@@ -173,7 +173,7 @@ graph TB
 ```
 
 - **① Preparation** (whoever installs the system runs it once from the command line): A makes the synthetic reports, and B loads them into the search data (ChromaDB)
-- **② Create an answer from the question** (it runs when the user types a question in the text box and presses "Send"; the answer mode is switched in the sidebar). F handles the screen (the text box, the "Send" button, the sidebar) and shows the result: the answer and the past cases it cited
+- **② Create an answer from the question** (it runs when the user types a question in the text box of the browser page launched in step 2 and presses "Send"; the answer mode is switched in the sidebar). F handles the screen (the text box, the "Send" button, the sidebar) and shows the result: the answer and the past cases it cited
   - **Plain mode** (default): F calls C's search function (`search`) and hands the result to D's answer-generation function (`answer_question`)
   - **Agent mode** (optional): instead of calling C and D directly, F calls G. G calls functions of C (writing the query `plan_query`, searching `search`, reranking `rerank`) and of D (writing the answer `answer_question`) while it grades and searches again if needed. With the default settings it searches once, so grading and re-search do not run. The screen also shows a record of what the agent did
 - **③ Measure search and answer accuracy** (evaluation, for developers): developers run it from the command line, on questions whose correct answers are known, to compare the plain mode, G and H with numbers and decide between them (end users do not use it; it is not part of the flow that answers a question)
