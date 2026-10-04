@@ -52,7 +52,7 @@ _MODE_AGENT = "エージェント（LangGraph・検索クエリを作ってか�
 
 
 def _mode_widget() -> str:
-    """回答方式の切り替え。langgraph（任意依存 .[agent]）が無い環境では通常モードのみ。"""
+    """回答方式の切り替え。langgraph（エージェント方式でだけ使う追加のライブラリ。.[agent]）が無い環境では通常モードのみ。"""
     st.sidebar.header("回答方式")
     if importlib.util.find_spec("langgraph") is None:
         st.sidebar.caption('エージェントを使うには `pip install -e ".[agent]"` が必要です。')

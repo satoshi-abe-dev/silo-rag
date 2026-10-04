@@ -170,7 +170,8 @@ def run_eval(
     """
     if pipeline not in PIPELINES:
         raise ValueError(f"pipelineは{PIPELINES}のいずれかを指定してください: {pipeline!r}")
-    # langgraph・langchainは任意依存（.[agent]・.[langchain]）。baselineだけ使う環境ではimportしない。
+    # langgraph・langchainは、agent・langchainのときだけ使う追加のライブラリ（.[agent]・.[langchain]）。
+    # baselineだけ使う環境ではimportしない。
     if pipeline == "agent":
         from .agent import run_agent
     elif pipeline == "langchain":
