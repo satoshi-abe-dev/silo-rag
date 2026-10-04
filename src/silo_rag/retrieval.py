@@ -75,6 +75,7 @@ def search(
     filters: dict[str, str] | None = None,
     history: list[tuple[str, str]] | None = None,
     rewrite_query: bool | None = None,
+    trace: list[str] | None = None,
 ) -> list[ScoredChunk]:
     """Run hybrid search (BM25 + vectors), blend the scores, then rerank with the LLM.
 
@@ -86,17 +87,26 @@ def search(
         (plan_query), dropping self-introductions and request phrasing and resolving
         references from history. Falls back to the history rewrite on failure.
         Defaults to config.retrieval.rewrite_query.
+    trace: if given, one line per step (query used, candidate counts, rerank) is appended
+        for the UI's record of the search.
     """
     config = load_config()
     resolved_top_k = top_k if top_k is not None else config.retrieval.top_k_final
     top_k_candidates = config.retrieval.top_k_candidates
     vector_weight = config.retrieval.vector_weight
     use_rewrite = config.retrieval.rewrite_query if rewrite_query is None else rewrite_query
-    planned = plan_query(client, query, history)[0] if use_rewrite else None
+    planned, plan_failure = plan_query(client, query, history) if use_rewrite else (None, None)
+    original = query
     if planned is not None:
         query = planned
-    elif history:
-        query = _resolve_query(client, query, history)
+        _note(trace, f"クエリ作成: 「{query}」")
+    else:
+        if plan_failure is not None:
+            _note(trace, f"クエリ作成: {plan_failure}。質問のまま検索")
+        if history:
+            query = _resolve_query(client, query, history)
+            if query != original:
+                _note(trace, f"言い換え（会話履歴から）: 「{query}」")
 
     import chromadb
 
@@ -115,6 +125,7 @@ def search(
     # return early and skip the pointless embedding request.
     bm25_scores, bm25_chunks = _bm25_search(collection, query, top_k_candidates, where)
     if not bm25_chunks:
+        _note(trace, f"検索「{query}」→ 該当0件")
         return []
 
     if vector_weight <= 0.0:
@@ -147,8 +158,19 @@ def search(
     combined = combined[:top_k_candidates]
 
     candidates = [ScoredChunk(chunk=chunk_map[chunk_id], score=score) for chunk_id, score in combined]
-    reranked = _llm_rerank(client, query, candidates)
-    return reranked[:resolved_top_k]
+    _note(
+        trace,
+        f"検索「{query}」→ キーワード検索{len(bm25_scores)}件・意味検索{len(vector_scores)}件、"
+        f"合わせて上位{len(candidates)}件",
+    )
+    reranked = _llm_rerank(client, query, candidates)[:resolved_top_k]
+    _note(trace, f"並べ直し: {len(candidates)}件 → 上位{len(reranked)}件")
+    return reranked
+
+
+def _note(trace: list[str] | None, line: str) -> None:
+    if trace is not None:
+        trace.append(line)
 
 
 # --- History-aware query rewrite ------------------------------------------------

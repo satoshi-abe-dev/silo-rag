@@ -292,3 +292,39 @@ def test_search_with_history_and_plan_uses_one_llm_call(empty_search):
     search(client, "それは？", history=[("前の質問", "前の回答")], rewrite_query=True)
     assert empty_search.bm25_queries == ["計画されたクエリ"]
     assert (client.plan_calls, client.resolve_calls) == (1, 0)
+
+
+# --- search()'s step record (shown under the answer in plain mode) ----------------------------
+
+
+def test_search_records_nothing_unless_a_trace_is_given(empty_search):
+    # Callers that pass no trace (the agent, eval) see no change.
+    assert search(_ScriptedClient(), "元の質問") == []
+
+
+def test_search_trace_shows_the_question_used_as_is(empty_search):
+    trace: list[str] = []
+    search(_ScriptedClient(), "元の質問", trace=trace)
+    assert trace == ["検索「元の質問」→ 該当0件"]
+
+
+def test_search_trace_shows_the_planned_query(empty_search):
+    trace: list[str] = []
+    search(_ScriptedClient(), "元の質問", rewrite_query=True, trace=trace)
+    assert trace == ["クエリ作成: 「計画されたクエリ」", "検索「計画されたクエリ」→ 該当0件"]
+
+
+def test_search_trace_shows_the_history_rewrite(empty_search):
+    trace: list[str] = []
+    search(_ScriptedClient(), "それは？", history=[("前の質問", "前の回答")], trace=trace)
+    assert trace == [
+        "言い換え（会話履歴から）: 「履歴で解決したクエリ」",
+        "検索「履歴で解決したクエリ」→ 該当0件",
+    ]
+
+
+def test_search_trace_shows_a_failed_plan_and_the_fallback(empty_search):
+    trace: list[str] = []
+    search(_ScriptedClient(plan=None), "元の質問", rewrite_query=True, trace=trace)
+    assert trace[0].startswith("クエリ作成: ") and trace[0].endswith("。質問のまま検索")
+    assert trace[1] == "検索「元の質問」→ 該当0件"
