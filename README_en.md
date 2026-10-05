@@ -4,15 +4,16 @@
 
 **A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.** Technical terms are explained in the [glossary](#glossary).
 
-> 🧭 **The requirements are the author's own. Most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author.**
+> 🧭 **The requirements and design decisions here are the author's.** The main ones:
 >
-> - **The author's requirements**: cross-department knowledge search (motivated by weak collaboration between departments, so knowledge never gets shared) / five mixed file formats (Markdown/Word/Excel/PowerPoint/PDF) / all processing on a local LLM with zero external transmission / "graph engineering" in the development process (splitting the work into nodes and designing with a diagram of how they depend on each other)
-> - **What AI turned those into**: a design map that splits the work into nodes (units of work), called a DAG; implementing nodes that don't depend on each other in parallel; and making an independent review by a different vendor's AI (the `codex` CLI) a required gate after each node
-> - **Proposed by AI, approved by the author after independent review**: the hybrid retrieval design (keyword search combined with semantic search), the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](docs/architecture_en.md#how-the-search-works-bm25-and-vector-search)), how citations are attached, and the evaluation split (measuring cross-department and same-department questions separately)
-> - AI was used as a pair-programming partner throughout, credited via `Co-Authored-By` on commits
-> - The author ran the UI and found the bugs and rough edges; the AI diagnosed and fixed them
+> - **Cross-department knowledge search** — starting from the problem that departments collaborate poorly, so knowledge never gets shared
+> - **Five mixed file formats** — the requirement that Markdown, Word, Excel, PowerPoint and PDF documents can be loaded and searched as they are
+> - **All processing on a local LLM, with zero external transmission** — the requirement that company documents never leave the machine
+> - **Graph engineering in the development process** — splitting the work into nodes and designing with a diagram of how they depend on each other
+> - **Deciding from the measurements** — made plain mode the default, and kept query rewriting off by default (re-measured on 45 questions, it showed no confirmed effect)
+> - **Checking the UI and directing the fixes** — the author ran the UI, found bugs and confusing spots, and decided how they should change (the AI diagnosed and fixed them)
 >
-> How it was developed (graph engineering and independent review) is detailed in [how it was developed](docs/development_process_en.md).
+> Most of the technical implementation was proposed by AI (Claude Code), then reviewed and approved by the author. Proposed by AI: the design map that splits the work into nodes (a DAG) and implementing nodes that don't depend on each other in parallel; making an independent review by a different vendor's AI (the `codex` CLI) a required gate after each node; the hybrid retrieval design (keyword search combined with semantic search); the `BM25Okapi` → `BM25Plus` bug fix ([what BM25 is](docs/architecture_en.md#how-the-search-works-bm25-and-vector-search)); how citations are attached; and the evaluation split (measuring cross-department and same-department questions separately). AI was used as a pair-programming partner, credited via `Co-Authored-By` on commits. How it was developed (graph engineering and independent review) is detailed in [how it was developed](docs/development_process_en.md).
 
 ## Background and problem
 
