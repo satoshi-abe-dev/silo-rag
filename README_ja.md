@@ -55,9 +55,10 @@ pip install -e ".[dev]"
 
 以降のコマンドは、仮想環境を有効化した状態で実行する。
 
-開発するときは、CI（下の「開発の進め方」）と同じ検査を、手元でも実行できる（`.[dev]`が必要）。
+開発するときは、CI（下の「開発の進め方」）と同じ検査を、手元でも実行できる。CIと同じく、エージェント方式とLangChain連携の追加のライブラリも必要（それらのテストが、読み込むため）。
 
 ```bash
+pip install -e ".[dev,agent,langchain]"
 ruff check .               # lint（書き方の検査）
 mypy                       # 型の検査
 pytest -m "not needs_llm"  # テスト（本物のLLMを使わないもの）

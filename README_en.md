@@ -55,9 +55,10 @@ pip install -e ".[dev]"
 
 Run every command below with the virtual environment activated.
 
-For development, the same checks that CI runs (see "How it was developed" below) can be run locally (needs `.[dev]`):
+For development, the same checks that CI runs (see "How it was developed" below) can be run locally. As in CI, this also needs the extra libraries for the agent mode and the LangChain wrapper, because their tests import them:
 
 ```bash
+pip install -e ".[dev,agent,langchain]"
 ruff check .               # lint (style and error checks)
 mypy                       # type checking
 pytest -m "not needs_llm"  # tests (the ones that need no real LLM)
