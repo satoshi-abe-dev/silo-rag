@@ -143,7 +143,7 @@ Plain mode searches the documents with the question as typed, then answers. The 
 pip install -e ".[agent]"
 ```
 
-Once installed, "エージェント" (agent) appears under "answer mode" in the sidebar (how to switch is in step 3). Which model does which step is under "Which model does what" in the [architecture](#architecture). Its settings and how to measure it are in [the agent mode's design](docs/agent_en.md).
+Once installed, "エージェント" (agent) appears under "answer mode" in the sidebar (how to switch is in step 3). Which AI each node uses is in the [architecture](#architecture). Its settings and how to measure it are in [the agent mode's design](docs/agent_en.md).
 
 ## Constraints and scope
 
@@ -246,16 +246,26 @@ graph TB
 | G (optional) | `agent.py` | The agent mode (LangGraph) |
 | H (optional) | `langchain_adapter.py` | Answers with LangChain's stock agent, to compare it with G |
 
-**Which model does what** (all run on your own computer; set under `[ai]` in `config.toml` as `llm_model`, `embed_model` and `vlm_model`)
+**Which AI each node uses** (three kinds of AI, all running on your own computer; set under `[ai]` in `config.toml`)
 
-- **Rewriting the question into search-friendly words** (agent mode; plain mode can turn it on in the settings): the chat LLM
-- **Searching the documents**: keyword search (BM25, a formula that scores how the words appear, not an AI model) and the embedding model (turns sentences into lists of numbers and finds close meanings) collect the candidates; the chat LLM then reranks them by how well they fit the question
-- **Making words like "that" concrete, and writing the answer**: the chat LLM
-- **Turning images in the reports into text** (at ingestion): the model that can read images (VLM)
+| AI (key in `config.toml`) | Node | What it does |
+| --- | --- | --- |
+| The chat LLM (`llm_model`) | A datagen | Writes the text of the synthetic reports |
+| | C retrieval | Rewrites the question into search terms (agent mode; plain mode can turn it on in the settings). Makes words like "that" concrete from the conversation history. Reranks the search candidates by how well they fit the question |
+| | D generation | Writes the answer from the documents found |
+| | E eval | Scores, from 1 to 5, how well an answer matches the correct one |
+| | G agent (optional) | Grades whether the evidence is enough, and if not, writes new words to search with |
+| | H langchain_adapter (optional) | Runs LangChain's ready-made agent |
+| The embedding model (`embed_model`) | B ingest | Turns the text being loaded (chunks) into lists of numbers that represent meaning |
+| | C retrieval | Turns the question into a list of numbers and finds text with close meanings |
+| The model that can read images (VLM, `vlm_model`) | B ingest | Turns images in the reports (such as KPI trend charts) into text, so their content can be found by search |
+
+- F app (the screen) does not use AI directly; it calls C and D, or G
+- Keyword search (BM25, inside C) is not an AI model but a formula that scores how the words appear
 
 **The search data (ChromaDB)**: ChromaDB is a database component that runs on your own computer (a vector database, which can find entries by how close their lists of numbers are). B (ingestion) stores the report text split by heading (chunks), details such as the department, and the lists of numbers made by the embedding model, in `data/chroma_db/`. When searching, semantic search finds entries by how close those numbers are, and keyword search (BM25) scores the stored text. Nothing is sent to an outside server, and the folder is not tracked by git.
 
-The AI models each node uses, and how the search works (BM25 keyword search and vector search, which looks for meaning), are in [how it works](docs/architecture_en.md). A [worked example](docs/worked_example_en.md) follows one question all the way to an answer with real values.
+More detail on each node, and how the search works (BM25 keyword search and vector search, which looks for meaning), are in [how it works](docs/architecture_en.md). A [worked example](docs/worked_example_en.md) follows one question all the way to an answer with real values.
 
 ## The agent mode (nodes G and H)
 
