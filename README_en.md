@@ -38,7 +38,7 @@ The "answer mode" in the sidebar switches between the plain mode and the agent m
 
 - Python 3.11 or later
 - Software that runs AI models on your own computer, such as [LM Studio](https://lmstudio.ai/) (anything that can be called the same way as OpenAI's API)
-  - Models to load: a chat model that writes text, an embedding model that turns sentences into lists of numbers, and a **model that can read images (VLM)** (e.g., the Qwen2.5-VL / Qwen3-VL family). Without the VLM, only the image descriptions are skipped; everything else works
+  - Models to load: an LLM that writes text, an embedding model that turns sentences into lists of numbers, and a **model that can read images (VLM)** (e.g., the Qwen2.5-VL / Qwen3-VL family). Without the VLM, only the image descriptions are skipped; everything else works
   - The default endpoint is `http://localhost:1234/v1`. For another server (e.g., Ollama at `http://localhost:11434/v1`), set `[ai] base_url` in `config.toml` or the `SILORAG_AI_BASE_URL` environment variable (priority: env var > `config.toml` > built-in default)
 
 ### Install
@@ -235,18 +235,18 @@ graph TB
 
 **What each node does, and the AI it uses**
 
-There are three kinds of AI, all running on your own computer (set under `[ai]` in `config.toml`): **the chat LLM** (`llm_model`), **the embedding model** (`embed_model`; turns sentences into lists of numbers that represent meaning), and **the VLM** (`vlm_model`; can read images).
+There are three kinds of AI, all running on your own computer (set under `[ai]` in `config.toml`): **the LLM** (`llm_model`), **the embedding model** (`embed_model`; turns sentences into lists of numbers that represent meaning), and **the VLM** (`vlm_model`; can read images).
 
 | Node | File (in `src/silo_rag/`) | Role | AI used, and what for |
 | --- | --- | --- | --- |
-| A | `datagen.py` | Writes the demo's synthetic reports, and the evaluation questions with their correct answers | Chat LLM: writes the text of the reports |
+| A | `datagen.py` | Writes the demo's synthetic reports, and the evaluation questions with their correct answers | LLM: writes the text of the reports |
 | B | `ingest.py` | Splits the reports by heading and loads them into the search data (ChromaDB) | Embedding model: turns the text into lists of numbers<br>VLM: turns images in the reports (such as charts) into text |
-| C | `retrieval.py` | Searches by combining keyword search and semantic search, then reranks with AI | Embedding model: finds text with close meanings<br>Chat LLM: rewrites the question into search terms (agent mode; plain mode can turn it on in the settings), makes words like "that" concrete, reranks the candidates<br>(BM25 keyword search is a formula, not AI) |
-| D | `generation.py` | Writes the answer from the documents found, with citations | Chat LLM: writes the answer |
-| E | `eval.py` | Measures search and answer accuracy on questions with known answers (for developers) | Chat LLM: scores answers from 1 to 5 |
+| C | `retrieval.py` | Searches by combining keyword search and semantic search, then reranks with AI | Embedding model: finds text with close meanings<br>LLM: rewrites the question into search terms (agent mode; plain mode can turn it on in the settings), makes words like "that" concrete, reranks the candidates<br>(BM25 keyword search is a formula, not AI) |
+| D | `generation.py` | Writes the answer from the documents found, with citations | LLM: writes the answer |
+| E | `eval.py` | Measures search and answer accuracy on questions with known answers (for developers) | LLM: scores answers from 1 to 5 |
 | F | `app.py` | The screen (Streamlit) | None (calls C and D, or G) |
-| G (optional) | `agent.py` | The agent mode (LangGraph) | Chat LLM: grades whether the evidence is enough, and if not, writes new words to search with |
-| H (optional) | `langchain_adapter.py` | Answers with LangChain's stock agent, to compare it with G | Chat LLM: runs LangChain's ready-made agent |
+| G (optional) | `agent.py` | The agent mode (LangGraph) | LLM: grades whether the evidence is enough, and if not, writes new words to search with |
+| H (optional) | `langchain_adapter.py` | Answers with LangChain's stock agent, to compare it with G | LLM: runs LangChain's ready-made agent |
 
 **The search data (ChromaDB)**: ChromaDB is a database component that runs on your own computer (a vector database, which can find entries by how close their lists of numbers are). B (ingestion) stores the report text split by heading (chunks), details such as the department, and the lists of numbers made by the embedding model, in `data/chroma_db/`. When searching, semantic search finds entries by how close those numbers are, and keyword search (BM25) scores the stored text. Nothing is sent to an outside server, and the folder is not tracked by git.
 
