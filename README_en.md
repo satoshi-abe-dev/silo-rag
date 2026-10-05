@@ -192,12 +192,16 @@ graph TB
             direction LR
             E1["E eval<br/>evaluate"] --> CD1["calls C's and D's<br/>functions to measure<br/>accuracy"]
         end
-        subgraph ev2["Using G or H (optional)"]
+        subgraph ev2["Using G (optional)"]
             direction LR
             E2["E eval<br/>evaluate"] -->|"set on the command line<br/>--pipeline agent"| G2["G agent<br/>agent mode"] --> CD2["calls C's and D's<br/>functions to measure<br/>accuracy"]
-            E2 -->|"set on the command line<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD2
+        end
+        subgraph ev3["Using H (optional)"]
+            direction LR
+            E3["E eval<br/>evaluate"] -->|"set on the command line<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain wrapper"] --> CD3["calls C's and D's<br/>functions to measure<br/>accuracy"]
         end
         ev ~~~ ev2
+        ev2 ~~~ ev3
     end
     g1 ~~~ g2
     g2 ~~~ g3
@@ -209,6 +213,7 @@ graph TB
     style agent fill:#ffffff,stroke:#8c959f,color:#1f2328
     style ev fill:#ffffff,stroke:#8c959f,color:#1f2328
     style ev2 fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style ev3 fill:#ffffff,stroke:#8c959f,color:#1f2328
 ```
 
 - **① Preparation** (whoever installs the system runs it once from the command line): A makes the synthetic reports, and B loads them into the search data (ChromaDB)
@@ -217,7 +222,8 @@ graph TB
   - **Agent mode** (optional): F calls G instead. G uses functions of C and D to write a search query, search, grade the evidence and search again (by default it searches once, so grading and re-search do not run)
 - **③ Measure search and answer accuracy** (for developers; end users do not use it): measures accuracy on questions whose correct answers are known, to compare the plain mode, G and H with numbers and decide between them
   - **Plain mode** (default): E calls C and D directly and measures them
-  - **Using G or H** (optional): E goes through G or H to call C and D, and measures them
+  - **Using G** (optional): E goes through G to call C and D, and measures them
+  - **Using H** (optional): E goes through H to call C and D, and measures them
 
 **Using G and H** (plain mode needs nothing: it works from the start, both on the screen and when measuring accuracy)
 
