@@ -233,35 +233,20 @@ graph TB
   - Measuring accuracy: run `python -m silo_rag.eval --pipeline agent`, and the measurement uses G
 - **To use H (LangChain integration)**: first run `pip install -e ".[langchain]"` once. H cannot be used on the screen. It is used only when measuring accuracy with `python -m silo_rag.eval --pipeline langchain` (to compare LangChain's stock agent with G)
 
-**What each node does**
+**What each node does, and the AI it uses**
 
-| Node | File (in `src/silo_rag/`) | Role |
-| --- | --- | --- |
-| A | `datagen.py` | Writes the demo's synthetic reports, and the evaluation questions with their correct answers |
-| B | `ingest.py` | Splits the reports by heading and loads them into the search data (ChromaDB) |
-| C | `retrieval.py` | Searches by combining keyword search and semantic search, then reranks with AI |
-| D | `generation.py` | Writes the answer from the documents found, with citations |
-| E | `eval.py` | Measures search and answer accuracy on questions with known answers (for developers) |
-| F | `app.py` | The screen (Streamlit) |
-| G (optional) | `agent.py` | The agent mode (LangGraph) |
-| H (optional) | `langchain_adapter.py` | Answers with LangChain's stock agent, to compare it with G |
+There are three kinds of AI, all running on your own computer (set under `[ai]` in `config.toml`): **the chat LLM** (`llm_model`), **the embedding model** (`embed_model`; turns sentences into lists of numbers that represent meaning), and **the VLM** (`vlm_model`; can read images).
 
-**Which AI each node uses** (three kinds of AI, all running on your own computer; set under `[ai]` in `config.toml`)
-
-| AI (key in `config.toml`) | Node | What it does |
-| --- | --- | --- |
-| The chat LLM (`llm_model`) | A datagen | Writes the text of the synthetic reports |
-| | C retrieval | Rewrites the question into search terms (agent mode; plain mode can turn it on in the settings). Makes words like "that" concrete from the conversation history. Reranks the search candidates by how well they fit the question |
-| | D generation | Writes the answer from the documents found |
-| | E eval | Scores, from 1 to 5, how well an answer matches the correct one |
-| | G agent (optional) | Grades whether the evidence is enough, and if not, writes new words to search with |
-| | H langchain_adapter (optional) | Runs LangChain's ready-made agent |
-| The embedding model (`embed_model`) | B ingest | Turns the text being loaded (chunks) into lists of numbers that represent meaning |
-| | C retrieval | Turns the question into a list of numbers and finds text with close meanings |
-| The model that can read images (VLM, `vlm_model`) | B ingest | Turns images in the reports (such as KPI trend charts) into text, so their content can be found by search |
-
-- F app (the screen) does not use AI directly; it calls C and D, or G
-- Keyword search (BM25, inside C) is not an AI model but a formula that scores how the words appear
+| Node | File (in `src/silo_rag/`) | Role | AI used, and what for |
+| --- | --- | --- | --- |
+| A | `datagen.py` | Writes the demo's synthetic reports, and the evaluation questions with their correct answers | Chat LLM: writes the text of the reports |
+| B | `ingest.py` | Splits the reports by heading and loads them into the search data (ChromaDB) | Embedding model: turns the text into lists of numbers<br>VLM: turns images in the reports (such as charts) into text |
+| C | `retrieval.py` | Searches by combining keyword search and semantic search, then reranks with AI | Embedding model: finds text with close meanings<br>Chat LLM: rewrites the question into search terms (agent mode; plain mode can turn it on in the settings), makes words like "that" concrete, reranks the candidates<br>(BM25 keyword search is a formula, not AI) |
+| D | `generation.py` | Writes the answer from the documents found, with citations | Chat LLM: writes the answer |
+| E | `eval.py` | Measures search and answer accuracy on questions with known answers (for developers) | Chat LLM: scores answers from 1 to 5 |
+| F | `app.py` | The screen (Streamlit) | None (calls C and D, or G) |
+| G (optional) | `agent.py` | The agent mode (LangGraph) | Chat LLM: grades whether the evidence is enough, and if not, writes new words to search with |
+| H (optional) | `langchain_adapter.py` | Answers with LangChain's stock agent, to compare it with G | Chat LLM: runs LangChain's ready-made agent |
 
 **The search data (ChromaDB)**: ChromaDB is a database component that runs on your own computer (a vector database, which can find entries by how close their lists of numbers are). B (ingestion) stores the report text split by heading (chunks), details such as the department, and the lists of numbers made by the embedding model, in `data/chroma_db/`. When searching, semantic search finds entries by how close those numbers are, and keyword search (BM25) scores the stored text. Nothing is sent to an outside server, and the folder is not tracked by git.
 
