@@ -2,6 +2,8 @@
 
 日本語 | [English](README_en.md)
 
+[![CI](https://github.com/satoshi-abe-dev/silo-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/satoshi-abe-dev/silo-rag/actions/workflows/ci.yml)
+
 **社内の部署をまたいで、過去のプロジェクトの知見や教訓を探せる、検索アシスタント。質問すると、社内の資料を検索し、見つけた資料を根拠に、出典つきで答える（この仕組みを、RAG＝検索拡張生成と呼ぶ）。処理はすべて手元のPCで動くAI（ローカルLLM）で完結し、外部へは一切送信しない。** 専門用語は、[用語](#用語)にまとめた。
 
 > 🧭 **要件と、設計上の判断は作者によるもの。** 主なもの:
@@ -52,6 +54,17 @@ pip install -e ".[dev]"
 ```
 
 以降のコマンドは、仮想環境を有効化した状態で実行する。
+
+開発するときは、CI（下の「開発の進め方」）と同じ検査を、手元でも実行できる。CIと同じく、エージェント方式とLangChain連携の追加のライブラリも必要（それらのテストが、読み込むため）。
+
+```bash
+pip install -e ".[dev,agent,langchain]"
+ruff check .               # lint（書き方の検査）
+mypy                       # 型の検査
+pytest -m "not needs_llm"  # テスト（本物のLLMを使わないもの）
+```
+
+CIはPython 3.11で動かしている。手元がPython 3.12以降だと、`mypy`が、新しいnumpyの型情報を読めずに止まることがある。そのときは`mypy --python-version 3.12`で実行する。
 
 ### 設定
 
@@ -266,6 +279,7 @@ AIは3種類で、どれも手元のPCで動く（`config.toml`の`[ai]`で指�
 - **グラフエンジニアリング**: 処理をノードに分け、「どのノードがどのノードを使うか」を図（DAG）にして設計した。互いに依存しないノード（C・D）は、2つのAI（Claude Code のサブエージェント。製品の「エージェント方式」とは別物）に、同時に書かせた
 - **独立レビュー**: 各ノードの完了ごとに、別ベンダーのAI（`codex` CLI）のレビューを必須にした。BM25の重みが負になるバグや、評価データの漏れを、レビューで見つけて直した
 - **テスト**: 依存先を偽物に差し替えて、本物のLLMなしで、全ノードを1つずつテストできる
+- **CI**: PRを作るたび（と、`main`が更新されるたび）に、GitHub Actionsで、lint（ruff）・型の検査（mypy）・テスト（pytest。本物のLLMを使わないもの）が自動で走る。通らないと、`main`にマージできない（設定は`.github/workflows/ci.yml`）
 
 詳しくは、[開発の進め方](docs/development_process_ja.md)。
 

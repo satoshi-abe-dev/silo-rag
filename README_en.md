@@ -2,6 +2,8 @@
 
 [日本語](README_ja.md) | English
 
+[![CI](https://github.com/satoshi-abe-dev/silo-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/satoshi-abe-dev/silo-rag/actions/workflows/ci.yml)
+
 **A search assistant for finding lessons and know-how from past projects across the departments of a company. Ask a question, and it searches the company's documents and answers from what it finds, with citations (this approach is called RAG, retrieval-augmented generation). Everything runs on AI that works on your own computer (a local LLM), and nothing is sent outside.** Technical terms are explained in the [glossary](#glossary).
 
 > 🧭 **The requirements and design decisions here are the author's.** The main ones:
@@ -52,6 +54,17 @@ pip install -e ".[dev]"
 ```
 
 Run every command below with the virtual environment activated.
+
+For development, the same checks that CI runs (see "How it was developed" below) can be run locally. As in CI, this also needs the extra libraries for the agent mode and the LangChain wrapper, because their tests import them:
+
+```bash
+pip install -e ".[dev,agent,langchain]"
+ruff check .               # lint (style and error checks)
+mypy                       # type checking
+pytest -m "not needs_llm"  # tests (the ones that need no real LLM)
+```
+
+CI runs on Python 3.11. On Python 3.12 or later, `mypy` may stop because it can't read the type information of newer numpy versions; run `mypy --python-version 3.12` instead.
 
 ### Configure
 
@@ -266,6 +279,7 @@ More detail on each node, and how the search works (BM25 keyword search and vect
 - **Graph engineering**: the work was split into nodes, and the system was designed with a diagram (a DAG) of "which node uses which". Nodes that do not depend on each other (C and D) were written at the same time by two AIs (Claude Code subagents, unrelated to the product's "agent mode")
 - **Independent review**: after each node, a review by a different vendor's AI (the `codex` CLI) was required. It caught a bug that gave BM25 negative weights, and a leak in the evaluation data
 - **Tests**: dependencies can be swapped for fakes, so every node can be tested on its own without a real LLM
+- **CI**: every pull request (and every update to `main`) runs lint (ruff), type checking (mypy) and tests (pytest, the ones that need no real LLM) on GitHub Actions. A pull request can't be merged into `main` unless they pass (set up in `.github/workflows/ci.yml`)
 
 See [how it was developed](docs/development_process_en.md).
 
