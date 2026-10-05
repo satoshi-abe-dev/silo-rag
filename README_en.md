@@ -240,8 +240,8 @@ There are three kinds of AI, all running on your own computer (set under `[ai]` 
 | Node | File (in `src/silo_rag/`) | Role | AI used, and what for |
 | --- | --- | --- | --- |
 | A | `datagen.py` | Writes the demo's synthetic reports, and the evaluation questions with their correct answers | LLM: writes the text of the reports |
-| B | `ingest.py` | Splits the reports by heading and loads them into the search data (ChromaDB) | Embedding model: turns the text into lists of numbers<br>VLM: turns images in the reports (such as charts) into text |
-| C | `retrieval.py` | Searches by combining keyword search and semantic search, then reranks with AI | Embedding model: finds text with close meanings<br>LLM: rewrites the question into search terms (agent mode; plain mode can turn it on in the settings), makes words like "that" concrete, reranks the candidates<br>(BM25 keyword search is a formula, not AI) |
+| B | `ingest.py` | Splits the reports by heading and loads them into the search data (ChromaDB) | <ul><li>Embedding model: turns the text into lists of numbers</li><li>VLM: turns images in the reports (such as charts) into text</li></ul> |
+| C | `retrieval.py` | Searches by combining keyword search and semantic search, then reranks with AI | <ul><li>Embedding model: finds text with close meanings</li><li>LLM:<ul><li>rewrites the question into search terms (agent mode; plain mode can turn it on in the settings)</li><li>makes words like "that" concrete</li><li>reranks the candidates</li></ul></li><li>BM25 keyword search is a formula, not AI</li></ul> |
 | D | `generation.py` | Writes the answer from the documents found, with citations | LLM: writes the answer |
 | E | `eval.py` | Measures search and answer accuracy on questions with known answers (for developers) | LLM: scores answers from 1 to 5 |
 | F | `app.py` | The screen (Streamlit) | None (calls C and D, or G) |
