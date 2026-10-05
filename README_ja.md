@@ -192,12 +192,16 @@ graph TB
             direction LR
             E1["E eval<br/>評価"] --> CD1["C・D の機能を呼んで<br/>精度を測る"]
         end
-        subgraph ev2["G・Hを使う（オプション）"]
+        subgraph ev2["Gを使う（オプション）"]
             direction LR
             E2["E eval<br/>評価"] -->|"コマンドで指定<br/>--pipeline agent"| G2["G agent<br/>エージェント方式"] --> CD2["C・D の機能を呼んで<br/>精度を測る"]
-            E2 -->|"コマンドで指定<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携"] --> CD2
+        end
+        subgraph ev3["Hを使う（オプション）"]
+            direction LR
+            E3["E eval<br/>評価"] -->|"コマンドで指定<br/>--pipeline langchain"| H["H langchain_adapter<br/>LangChain連携"] --> CD3["C・D の機能を呼んで<br/>精度を測る"]
         end
         ev ~~~ ev2
+        ev2 ~~~ ev3
     end
     g1 ~~~ g2
     g2 ~~~ g3
@@ -209,6 +213,7 @@ graph TB
     style agent fill:#ffffff,stroke:#8c959f,color:#1f2328
     style ev fill:#ffffff,stroke:#8c959f,color:#1f2328
     style ev2 fill:#ffffff,stroke:#8c959f,color:#1f2328
+    style ev3 fill:#ffffff,stroke:#8c959f,color:#1f2328
 ```
 
 - **① 準備**（導入する人が、最初にコマンドで1回だけ実行する）: Aが合成レポートを作り、Bが取り込んで、検索用データ（ChromaDB）にする
@@ -217,7 +222,8 @@ graph TB
   - **エージェント方式**（オプション）: Fは、Gを呼ぶ。Gは、C・Dの機能を使いながら、検索クエリの作成・検索・判定・再検索を行う（初期設定では、検索は1回で、判定と再検索は動かない）
 - **③ 検索と回答の精度を測る**（開発者向け。利用者は使わない）: 通常方式とG・Hを、数字で比べて決めるために、正解の分かっている質問で、精度を測る
   - **通常方式**（既定）: Eが、C・Dを直接呼んで測る
-  - **G・Hを使う方式**（オプション）: Eが、GまたはHを経由して、C・Dを呼んで測る
+  - **Gを使う**（オプション）: Eが、Gを経由して、C・Dを呼んで測る
+  - **Hを使う**（オプション）: Eが、Hを経由して、C・Dを呼んで測る
 
 **G・Hの使い方**（通常方式は、何もしなくても、画面でも精度の測定でも、最初から使える）
 
